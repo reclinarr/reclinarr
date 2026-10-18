@@ -121,6 +121,11 @@ See [`.env.example`](./.env.example).
 
 Architecture: [docs/architecture.md](./docs/architecture.md).
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, checks, and pull request
+guidelines. Canonical repo: [reclinarr/reclinarr](https://github.com/reclinarr/reclinarr).
+
 ## Development
 
 ```bash
