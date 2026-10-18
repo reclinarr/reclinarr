@@ -1,0 +1,16 @@
+appId: app.streamerr.mobile
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 60000
+- tapOn: "Details"
+- extendedWaitUntil:
+    visible: "Ready to play"
+    timeout: 60000
+- scrollUntilVisible:
+    element: "Episodes"
+    direction: DOWN
+    timeout: 60000
+- takeScreenshot: ios-series-details
+- stopApp

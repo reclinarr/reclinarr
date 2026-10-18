@@ -1,0 +1,30 @@
+url: ${RECLINARR_WEB_URL || "http://localhost:5173"}
+---
+- launchApp:
+    clearState: true
+- tapOn: "Email or username"
+- inputText: ${RECLINARR_TEST_USERNAME}
+- tapOn: "Password"
+- inputText: ${RECLINARR_TEST_PASSWORD}
+- tapOn: "Sign In"
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 60000
+- tapOn: "Details"
+- extendedWaitUntil:
+    visible: "Ready to play"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "S4:E1.*"
+    timeout: 60000
+- tapOn:
+    text: "Resume"
+    index: 0
+- extendedWaitUntil:
+    visible: "Mr. Robot S4E1"
+    timeout: 90000
+- takeScreenshot: web-player-startup
+- extendedWaitUntil:
+    notVisible: "Buffering.*"
+    timeout: 90000
+- takeScreenshot: web-player-playing

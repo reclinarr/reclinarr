@@ -1,0 +1,41 @@
+{
+  "name": "reclinarr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reclinarr — Your media. One stream.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:api & npm run dev:web",
+    "dev:api": "npm run dev -w @reclinarr/api",
+    "dev:web": "npm run dev -w @reclinarr/web",
+    "dev:tv": "npm run start -w @reclinarr/tv",
+    "dev:mobile": "npm run start -w @reclinarr/mobile",
+    "build": "npm run build -w @reclinarr/shared && npm run build -w @reclinarr/client && npm run build -w @reclinarr/providers && npm run build -w @reclinarr/api && npm run build -w @reclinarr/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e:web": "maestro test --platform web .maestro/web",
+    "test:e2e:ios": "maestro test --platform ios .maestro/ios",
+    "test:e2e:tv": "maestro test --platform android .maestro/tv",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "overrides": {
+    "react-native": "npm:react-native-tvos@0.86.3-0",
+    "uuid": "11.1.1",
+    "glob": "13.0.6",
+    "@types/react": "~19.3.0"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true,
+    "better-sqlite3@13.0.3": true,
+    "fsevents@2.3.3": true
+  }
+}

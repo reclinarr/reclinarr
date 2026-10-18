@@ -1,0 +1,25 @@
+appId: app.streamerr.tv
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 60000
+- tapOn: "More Info"
+- extendedWaitUntil:
+    visible: "Ready to play"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "S4:E1.*"
+    timeout: 60000
+- tapOn:
+    text: "Resume"
+    index: 0
+- extendedWaitUntil:
+    visible: "Mr. Robot S4E1"
+    timeout: 90000
+- takeScreenshot: tv-player-startup
+- extendedWaitUntil:
+    notVisible: "Buffering.*"
+    timeout: 90000
+- takeScreenshot: tv-player-playing
+- stopApp

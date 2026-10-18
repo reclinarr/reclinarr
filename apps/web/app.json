@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Reclinarr",
+    "slug": "reclinarr-web",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "scheme": [
+      "reclinarr",
+      "streamerr"
+    ],
+    "platforms": [
+      "web"
+    ],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "streamerr-web"
+      }
+    }
+  }
+}

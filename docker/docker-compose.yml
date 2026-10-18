@@ -1,0 +1,28 @@
+# Local checkout:
+#   docker compose -f docker/docker-compose.yml up -d --build
+#
+# Build image from GitHub (no app checkout required; keep a local .env):
+#   docker compose -f docker/docker-compose.git.yml up -d --build
+
+services:
+  streamerr:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: reclinarr:local
+    container_name: reclinarr
+    ports:
+      - "${RECLINARR_PORT:-${STREAMERR_PORT:-8787}}:8787"
+    env_file:
+      - ../.env
+    environment:
+      RECLINARR_DATA_DIR: /data
+      RECLINARR_PUBLIC_URL: ${RECLINARR_PUBLIC_URL:-${STREAMERR_PUBLIC_URL:-http://localhost:8787}}
+    volumes:
+      - streamerr-data:/data
+      # Mount the same library path into Jellyfin so "Add to Library" is discoverable:
+      #   /data/library/movies and /data/library/series
+    restart: unless-stopped
+
+volumes:
+  streamerr-data:

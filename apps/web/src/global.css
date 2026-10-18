@@ -1,0 +1,103 @@
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: #000;
+  color: #fff;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hide scrollbars but keep scrollability (rails, modals). */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/*
+  RN-web dataSet keys are kebab-cased: seRail → data-se-rail.
+  Outer rail stays visible for stacking; the hscroll strip scrolls on X.
+
+  HOVER_ROOM under each rail overlaps the next row so popovers can paint.
+  The rail/track shells must NOT capture the pointer in that empty band —
+  only the cards (and their enlarged popovers) should.
+*/
+[data-se-rail],
+[data-se-rail="1"],
+[data-se-rail="hot"] {
+  overflow: visible !important;
+}
+
+[data-se-rail="hot"] {
+  z-index: 1000 !important;
+}
+
+[data-se-rail-track] {
+  overflow: visible !important;
+}
+
+/* pointer-events is not inherited — disable the whole rail tree, then re-enable cards. */
+[data-se-rail],
+[data-se-rail] * {
+  pointer-events: none !important;
+}
+
+[data-se-rail] [data-se-card],
+[data-se-rail] [data-se-card] * {
+  pointer-events: auto !important;
+}
+
+/* Hover popover shell — shadow/bg ease. */
+[data-se-card] [data-se-pop] {
+  will-change: box-shadow, background-color;
+  transition:
+    box-shadow 400ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Netflix scale — phase driven by data-se-scale from React (not inline styles). */
+[data-se-scale] {
+  transform-origin: 50% 0% !important;
+  will-change: transform;
+}
+
+[data-se-scale="idle"] {
+  transform: scale(1) !important;
+  transition: none !important;
+}
+
+/* Enlarged layout, still visually resting — no tween (open prep). */
+[data-se-scale="rest"] {
+  transform: scale(var(--se-rest-scale, 0.95)) !important;
+  transition: none !important;
+}
+
+/* Grow to full popover. */
+[data-se-scale="open"] {
+  transform: scale(1) !important;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+/* Shrink back toward the tile. */
+[data-se-scale="closing"] {
+  transform: scale(var(--se-rest-scale, 0.95)) !important;
+  transition: transform 320ms cubic-bezier(0.4, 0, 0.7, 0.2) !important;
+}
+
+/* Horizontal carousels (home rails, season pills, cast). */
+[data-se-hscroll] {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}

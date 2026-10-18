@@ -1,0 +1,114 @@
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /tmp/nginx.pid;
+
+events {
+  worker_connections 1024;
+}
+
+http {
+  include       /etc/nginx/mime.types;
+  default_type  application/octet-stream;
+  sendfile      on;
+  tcp_nopush    on;
+  keepalive_timeout 65;
+  # Prefer Docker DNS so Compose hostnames (jellyfin, …) resolve for X-Accel;
+  # public resolvers cover external HTTPS upstreams. Docker often has no IPv6.
+  resolver 127.0.0.11 1.1.1.1 8.8.8.8 ipv6=off valid=30s;
+  # Do not log query strings (may contain upstream tokens in accel paths).
+  log_format main '$remote_addr - $remote_user [$time_local] "$request_method $uri" '
+                  '$status $body_bytes_sent "$http_referer"';
+  access_log /var/log/nginx/access.log main;
+
+  # Upstream API (loopback inside the Reclinarr container)
+  upstream reclinarr_api {
+    server 127.0.0.1:${RECLINARR_API_PORT};
+    keepalive 32;
+  }
+
+  server {
+    listen ${RECLINARR_PORT};
+    server_name _;
+    client_max_body_size 32m;
+
+    # Mark requests so the API knows nginx is in front (optional).
+    proxy_set_header X-Streamerr-Media-Plane nginx;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Cookie $http_cookie;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    # Internal: Jellyfin media (token already in query from X-Accel-Redirect).
+    location /_upstream/jellyfin/ {
+      internal;
+      # set before rewrite break (rewrite module stops at break).
+      # Variable proxy_pass + resolver → IPv4-only DNS + SNI at request time.
+      set $jellyfin_upstream "${JELLYFIN_UPSTREAM}";
+      rewrite ^/_upstream/jellyfin/(.*)$ /$1 break;
+      proxy_pass $jellyfin_upstream;
+      proxy_ssl_server_name on;
+      proxy_ssl_name ${JELLYFIN_HOST};
+      proxy_ssl_protocols TLSv1.2 TLSv1.3;
+      # Buffer complete VOD segments — improves throughput vs stream-copy through CF.
+      proxy_buffering on;
+      proxy_request_buffering off;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host ${JELLYFIN_HOST};
+      proxy_pass_request_headers off;
+      proxy_set_header Range $http_range;
+      proxy_set_header If-Range $http_if_range;
+      # Cold ffmpeg / first HLS segments can exceed the default 60s read timeout → 502.
+      proxy_read_timeout 24h;
+      proxy_send_timeout 24h;
+    }
+
+    # Internal: Dispatcharr media (token in query; CF Access headers from env).
+    location /_upstream/dispatcharr/ {
+      internal;
+      set $dispatcharr_upstream "${DISPATCHARR_UPSTREAM}";
+      rewrite ^/_upstream/dispatcharr/(.*)$ /$1 break;
+      proxy_pass $dispatcharr_upstream;
+      proxy_ssl_server_name on;
+      proxy_ssl_name ${DISPATCHARR_HOST};
+      proxy_ssl_protocols TLSv1.2 TLSv1.3;
+      proxy_buffering off;
+      proxy_request_buffering off;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_set_header Host ${DISPATCHARR_HOST};
+      proxy_pass_request_headers off;
+      proxy_set_header Range $http_range;
+      # Quoted so empty env values stay valid nginx syntax.
+      proxy_set_header CF-Access-Client-Id "${DISPATCHARR_CF_ACCESS_CLIENT_ID}";
+      proxy_set_header CF-Access-Client-Secret "${DISPATCHARR_CF_ACCESS_CLIENT_SECRET}";
+      # Live MPEG-TS: disable proxy buffering
+      proxy_read_timeout 24h;
+    }
+
+    # Internal: HLS files on the shared data volume.
+    location /_hls/ {
+      internal;
+      alias ${RECLINARR_DATA_DIR}/hls/;
+      add_header Cache-Control "no-cache" always;
+      types {
+        application/vnd.apple.mpegurl m3u8;
+        video/mp2t ts;
+        video/mp4 m4s mp4;
+      }
+      default_type application/octet-stream;
+    }
+
+    # Everything else → API (auth, resolve, playlists, UI).
+    location / {
+      proxy_pass http://reclinarr_api;
+      proxy_buffering off;
+      proxy_request_buffering off;
+      proxy_read_timeout 24h;
+      proxy_send_timeout 24h;
+    }
+  }
+}

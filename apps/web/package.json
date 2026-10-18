@@ -1,0 +1,44 @@
+{
+  "name": "@reclinarr/web",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "dev": "expo start --web --port 5173",
+    "start": "expo start --web --port 5173",
+    "build": "expo export -p web --output-dir dist",
+    "postbuild": "node scripts/finalize-export.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@react-navigation/native": "^7.1.17",
+    "@react-navigation/native-stack": "^7.3.26",
+    "@reclinarr/client": "*",
+    "@reclinarr/native-ui": "*",
+    "@reclinarr/player-web": "*",
+    "@reclinarr/shared": "*",
+    "@tanstack/react-query": "^5.67.2",
+    "expo": "~57.0.13",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "npm:react-native-tvos@^0.86.3-0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.16.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~5.9.2"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native"
+      ]
+    }
+  }
+}

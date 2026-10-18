@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Reclinarr",
+    "slug": "reclinarr-tv",
+    "version": "0.1.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": [
+      "reclinarr",
+      "streamerr"
+    ],
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "app.streamerr.tv",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#11141b"
+      },
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "plugins": [
+      [
+        "@react-native-tvos/config-tv",
+        {
+          "isTV": true,
+          "androidTVBanner": "./assets/tv-banner.png",
+          "androidTVIcon": "./assets/icon.png"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 28,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "streamerr-tv"
+      }
+    }
+  }
+}

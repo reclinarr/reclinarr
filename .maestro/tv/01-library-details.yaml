@@ -1,0 +1,15 @@
+appId: app.streamerr.tv
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 60000
+- tapOn: "More Info"
+- extendedWaitUntil:
+    visible: "Ready to play"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "Episodes"
+    timeout: 60000
+- takeScreenshot: tv-series-details
+- stopApp

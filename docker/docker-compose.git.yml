@@ -1,0 +1,30 @@
+# Build & run Reclinarr from the public GitHub repository.
+# Keep a local .env at the repository root (or create a folder with this compose file + .env).
+#
+#   cp .env.example .env   # fill in Jellyfin / Seerr / Dispatcharr
+#   docker compose -f docker/docker-compose.git.yml up -d --build
+#
+# Image-only (no compose):
+#   docker build -t reclinarr https://github.com/fearlessfara/streamerr.git
+#   docker run --env-file .env -p 8787:8787 -v streamerr-data:/data reclinarr
+
+services:
+  streamerr:
+    build:
+      context: https://github.com/fearlessfara/streamerr.git#main
+      dockerfile: Dockerfile
+    image: reclinarr:git
+    container_name: reclinarr
+    ports:
+      - "${RECLINARR_PORT:-${STREAMERR_PORT:-8787}}:8787"
+    env_file:
+      - ../.env
+    environment:
+      RECLINARR_DATA_DIR: /data
+      RECLINARR_PUBLIC_URL: ${RECLINARR_PUBLIC_URL:-${STREAMERR_PUBLIC_URL:-http://localhost:8787}}
+    volumes:
+      - streamerr-data:/data
+    restart: unless-stopped
+
+volumes:
+  streamerr-data:

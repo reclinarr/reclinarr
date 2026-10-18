@@ -1,0 +1,34 @@
+# Dependencies & build
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+.expo/
+apps/web/dist/
+apps/api/dist/
+packages/*/dist/
+
+# Local runtime data (acquisitions, sqlite, library)
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Secrets & local env (keep .env.example)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.id_rsa*
+.npmrc
+.netrc
+credentials.json
+secrets/
+
+# Logs / OS
+*.log
+.DS_Store

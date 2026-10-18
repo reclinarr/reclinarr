@@ -1,0 +1,32 @@
+{
+  "name": "@reclinarr/player-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@reclinarr/client": "*",
+    "@reclinarr/native-ui": "*",
+    "@reclinarr/shared": "*",
+    "hls.js": "^1.7.3",
+    "mpegts.js": "^1.8.2"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-dom": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "^5.8.2"
+  }
+}

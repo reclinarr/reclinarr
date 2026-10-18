@@ -1,0 +1,22 @@
+appId: app.streamerr.mobile
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Continue Watching"
+    timeout: 60000
+- tapOn: "Details"
+- extendedWaitUntil:
+    visible: "Ready to play"
+    timeout: 60000
+- tapOn:
+    text: "Resume"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "Ready to play"
+    timeout: 90000
+- takeScreenshot: ios-player-startup
+- extendedWaitUntil:
+    notVisible: "Buffering.*"
+    timeout: 90000
+- takeScreenshot: ios-player-playing
+- stopApp
