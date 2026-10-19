@@ -22,6 +22,7 @@ export type PlayParams = {
 export type RootStackParamList = {
   Boot: undefined;
   Login: undefined;
+  Setup: undefined;
   Home: undefined;
   Movies: undefined;
   Series: undefined;

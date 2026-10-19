@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logout, searchMedia } from "@reclinarr/client";
-import { Artwork, BrandLogo, openMedia, webGradient } from "@reclinarr/native-ui";
+import { Artwork, BrandLogo, colors, openMedia, webGradient } from "@reclinarr/native-ui";
 import type { RootStackParamList } from "../nav";
 import { useWebLayout } from "../layout";
 import { clearSession } from "../session";
@@ -179,11 +179,18 @@ export function WebChrome({
                   setSearchValue(v);
                   setPanelOpen(true);
                 }}
-                placeholder="Titles, people, genres"
+                placeholder="Search movies and series"
                 placeholderTextColor="rgba(255,255,255,0.6)"
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoFocus
+                returnKeyType="search"
+                onSubmitEditing={() => {
+                  const term = searchValue.trim();
+                  if (term.length < 2) return;
+                  setPanelOpen(false);
+                  navigation.navigate("Search", { q: term });
+                }}
               />
             ) : null}
           </View>
@@ -335,11 +342,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 4,
-    backgroundColor: "#e50914",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  avatarText: { color: colors.bg, fontWeight: "700", fontSize: 14 },
   caret: { color: "#fff", fontSize: 12 },
   menu: {
     position: "absolute",

@@ -248,6 +248,11 @@ export const SeerrMediaRequestSchema = z
         status: z.number().optional(),
         status4k: z.number().optional(),
         mediaType: z.string().optional(),
+        title: z.string().optional(),
+        name: z.string().optional(),
+        releaseDate: z.string().optional().nullable(),
+        firstAirDate: z.string().optional().nullable(),
+        posterPath: z.string().optional().nullable(),
       })
       .passthrough()
       .optional()

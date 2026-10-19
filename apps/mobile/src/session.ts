@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import appConfig from "../app.json";
 import type { ReclinarrClient } from "@reclinarr/client";
 import {
   attachClient as attach,
@@ -23,7 +24,12 @@ export async function clearSession(): Promise<void> {
 }
 
 export function attachClient(baseUrl: string): ReclinarrClient {
-  return attach(AsyncStorage, baseUrl);
+  return attach(
+    AsyncStorage,
+    baseUrl,
+    appConfig.expo.version,
+    process.env.EXPO_PUBLIC_POSTHOG_PROJECT_KEY,
+  );
 }
 
 /** Re-attach after Metro reload / cold start so login sessions are stored. */

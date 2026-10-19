@@ -64,7 +64,7 @@ export function LiveScreen({
   const filterOffsets = useRef<Record<string, number>>({});
   // Android TV Yoga often collapses flex:1 FlatLists under the filter row to 0 height.
   // Pin an explicit viewport so channels actually paint and can scroll with focus.
-  const channelListH = Math.max(280, Math.round(windowH - (tv ? 560 : 360)));
+  const channelListH = Math.max(280, Math.round(windowH - (tv ? 430 : 360)));
   // iOS: AVPlayer cannot play MPEG-TS. Web: mpegts.js drifts A/V on IPTV PCRs.
   const preferHls = Platform.OS === "ios" || Platform.OS === "web";
 
@@ -233,7 +233,7 @@ export function LiveScreen({
       {header}
       <View style={styles.bodyPad}>
         <TextInput
-          style={styles.search}
+          style={[styles.search, tv && styles.searchTv]}
           value={search}
           onChangeText={(v) => {
             setSearch(v);
@@ -245,7 +245,7 @@ export function LiveScreen({
           autoCorrect={false}
         />
 
-        <View style={styles.toolbar}>
+        <View style={[styles.toolbar, tv && styles.toolbarTv]}>
           <Button
             label={SORT_LABELS[sort]}
             variant="ghost"
@@ -311,14 +311,15 @@ export function LiveScreen({
           ref={filterScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.filtersScroll}
-          contentContainerStyle={styles.filters}
+          style={[styles.filtersScroll, tv && styles.filtersScrollTv]}
+          contentContainerStyle={[styles.filters, tv && styles.filtersTv]}
         >
           {filterItems.map((item) => (
             <FilterChip
               key={item.id || "all"}
               label={item.label}
               active={groupId === item.id}
+              compact={tv}
               onPress={() => setFilter(item.id as string | "favourites" | "")}
               showFocusRing={tv}
               onLayout={(x) => {
@@ -405,6 +406,7 @@ export function LiveScreen({
 function FilterChip({
   label,
   active,
+  compact = false,
   onPress,
   showFocusRing = false,
   onFocus,
@@ -412,6 +414,7 @@ function FilterChip({
 }: {
   label: string;
   active: boolean;
+  compact?: boolean;
   onPress: () => void;
   showFocusRing?: boolean;
   onFocus?: () => void;
@@ -426,6 +429,7 @@ function FilterChip({
       accessibilityState={{ selected: active }}
       style={(state) => [
         styles.filterChip,
+        compact && styles.filterChipCompact,
         active && styles.filterChipActive,
         showFocusRing && isTvFocused(state) && styles.filterChipFocused,
       ]}
@@ -435,7 +439,7 @@ function FilterChip({
           style={[
             styles.filterChipLabel,
             active && styles.filterChipLabelActive,
-            showFocusRing && isTvFocused(state) && !active && styles.filterChipLabelFocused,
+            showFocusRing && isTvFocused(state) && styles.filterChipLabelFocused,
           ]}
           numberOfLines={1}
         >
@@ -506,7 +510,7 @@ function PlayChannelButton({
         showFocusRing && isTvFocused(state) && styles.playBtnFocused,
       ]}
     >
-      <PlayIcon color="#fff" size={compact ? 14 : 16} />
+      <PlayIcon color={colors.bg} size={compact ? 14 : 16} />
       <Text style={styles.playBtnLabel}>Play</Text>
     </Pressable>
   );
@@ -662,6 +666,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 10,
   },
+  searchTv: { paddingVertical: 8, marginBottom: 6 },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
@@ -669,6 +674,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 10,
   },
+  toolbarTv: { marginBottom: 6 },
   toolbarBtn: { paddingVertical: 8, paddingHorizontal: 12 },
   viewToggle: {
     flexDirection: "row",
@@ -712,6 +718,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     maxHeight: 48,
   },
+  filtersScrollTv: { marginBottom: 6 },
   filters: {
     flexDirection: "row",
     flexWrap: "nowrap",
@@ -720,6 +727,7 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     minHeight: 44,
   },
+  filtersTv: { minHeight: 38 },
   channelListBox: { paddingHorizontal: 16 },
   cardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   cardCell: { width: "48%", flexGrow: 1 },
@@ -736,12 +744,15 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     marginRight: 0,
   },
+  filterChipCompact: { paddingVertical: 6, minHeight: 34 },
   filterChipActive: {
-    backgroundColor: colors.text,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.4)",
   },
   filterChipFocused: {
-    borderColor: colors.focus,
+    borderColor: colors.bg,
     backgroundColor: colors.focus,
+    transform: [{ scale: 1.06 }],
   },
   filterChipLabel: {
     color: colors.text,
@@ -750,7 +761,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   filterChipLabelActive: {
-    color: colors.bg,
+    color: colors.text,
   },
   filterChipLabelFocused: {
     color: colors.bg,
@@ -857,7 +868,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.08 }],
   },
   playBtnLabel: {
-    color: "#fff",
+    color: colors.bg,
     fontSize: 14,
     fontWeight: "700",
   },

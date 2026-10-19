@@ -38,7 +38,7 @@ import { HScroll } from "../HScroll.js";
 import { DownloadIcon, PlayIcon } from "../icons.js";
 import { MediaRail } from "../MediaRail.js";
 import { NfBackIcon } from "../player/PlayerIcons.js";
-import { DetailsSkeleton } from "../Skeleton.js";
+import { DetailsModalSkeleton, DetailsSkeleton, EpisodeListSkeleton, SkeletonBlock } from "../Skeleton.js";
 import { colors } from "../theme.js";
 import type { NativeLayout } from "../layout.js";
 import {
@@ -776,7 +776,12 @@ export function DetailsScreen({
       <View style={styles.seasons}>
         <Text style={web ? styles.webSection : styles.title}>Episodes</Text>
         {episodesQuery.isPending ? (
-          <Text style={web ? styles.epOverview : styles.meta}>Loading episodes…</Text>
+          <>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+              {[0, 1, 2].map((i) => <SkeletonBlock key={i} width={64} height={36} radius={18} />)}
+            </View>
+            <EpisodeListSkeleton rows={3} />
+          </>
         ) : null}
         {episodesQuery.isError ? (
           <Text style={styles.error}>
@@ -900,7 +905,7 @@ export function DetailsScreen({
             contentContainerStyle={{ paddingBottom: 48 }}
             showsVerticalScrollIndicator
           >
-            {showSkeleton ? <DetailsSkeleton backdropH={heroH} /> : null}
+            {showSkeleton ? <DetailsModalSkeleton backdropH={heroH} /> : null}
             {details.isError ? (
               <Text style={[styles.error, { paddingHorizontal: 28, marginTop: 48 }]}>
                 {(details.error as Error).message}
@@ -924,7 +929,7 @@ export function DetailsScreen({
                           tone="light"
                           onPress={() => request.mutate()}
                           disabled={request.isPending}
-                          showFocusRing={tv}
+                          showFocusRing
                           hasTVPreferredFocus={tv || undefined}
                         />
                       ) : (
@@ -934,7 +939,7 @@ export function DetailsScreen({
                           tone="light"
                           onPress={() => play.mutate()}
                           disabled={playbackDisabled}
-                          showFocusRing={tv}
+                          showFocusRing
                           hasTVPreferredFocus={tv || undefined}
                         />
                       )}
@@ -1027,7 +1032,14 @@ export function DetailsScreen({
                     creators={media.metadata.creators}
                     isTv={isTv}
                   />
-                  {(similarQuery.data?.items?.length ?? 0) > 0 ? (
+                  {similarQuery.isPending ? (
+                    <View style={{ marginTop: 28, marginHorizontal: -28, paddingLeft: 28, gap: 10 }}>
+                      <SkeletonBlock width={150} height={20} />
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        {[0, 1, 2, 3, 4].map((i) => <SkeletonBlock key={i} width={140} height={190} />)}
+                      </View>
+                    </View>
+                  ) : (similarQuery.data?.items?.length ?? 0) > 0 ? (
                     <View style={{ marginTop: 28, marginHorizontal: -28 }}>
                       <MediaRail
                         title="More Like This"

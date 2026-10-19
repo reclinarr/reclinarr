@@ -1,4 +1,5 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { colors } from "../theme.js";
 
 /** Shared waiting state for web, iOS and Android TV video surfaces. */
 export function BufferingOverlay({
@@ -54,6 +55,6 @@ const styles = StyleSheet.create({
   fill: {
     height: "100%",
     borderRadius: 2,
-    backgroundColor: "#e50914",
+    backgroundColor: colors.accent,
   },
 });

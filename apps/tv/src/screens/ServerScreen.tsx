@@ -34,12 +34,12 @@ export function ServerScreen() {
     <View style={styles.page}>
       <BrandLogo size={38} style={{ marginBottom: 24 }} />
       <Text style={styles.title}>Connect to your server</Text>
-      <Text style={styles.copy}>Enter the Reclinarr address on your LAN, for example 192.168.1.10:8787</Text>
+      <Text style={styles.copy}>Enter your Reclinarr server address</Text>
       <TvTextInput
         style={styles.input}
         value={url}
         onChangeText={setUrl}
-        placeholder="http://192.168.1.10:8787"
+        placeholder="https://reclinarr.example.com"
         placeholderTextColor={colors.muted}
         autoCapitalize="none"
         autoCorrect={false}

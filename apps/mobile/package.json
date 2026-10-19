@@ -4,9 +4,9 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
+    "start": "node ../../scripts/with-expo-env.mjs expo start",
+    "android": "node ../../scripts/with-expo-env.mjs expo run:android",
+    "ios": "node ../../scripts/with-expo-env.mjs expo run:ios",
     "prebuild": "expo prebuild --clean",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo 'no tests'",

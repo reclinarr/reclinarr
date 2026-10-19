@@ -53,11 +53,18 @@ export async function clearSession(storage: KeyValueStorage): Promise<void> {
   await storage.removeItem?.(SESSION_KEY);
 }
 
-export function attachClient(storage: KeyValueStorage, baseUrl: string): ReclinarrClient {
+export function attachClient(
+  storage: KeyValueStorage,
+  baseUrl: string,
+  appVersion?: string,
+  posthogProjectKey?: string,
+): ReclinarrClient {
   return configureClient({
     baseUrl,
     credentials: "include",
     storage,
+    appVersion,
+    posthogProjectKey,
     getSessionId: () => storage.getItem(SESSION_KEY),
     setSessionId: async (id) => {
       if (id) await storage.setItem(SESSION_KEY, id);

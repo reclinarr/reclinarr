@@ -47,6 +47,7 @@ Logo source files are in [`assets/branding`](./assets/branding).
 | Web (RN Web) | Done — `apps/web` Expo + `react-native-web` |
 
 See [docs/roadmap.md](./docs/roadmap.md) and [docs/native-unification.md](./docs/native-unification.md).
+Opt-in performance metrics are configured in [docs/performance-telemetry.md](./docs/performance-telemetry.md).
 
 ## Requirements
 

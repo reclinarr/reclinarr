@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   label: { fontSize: 15, fontWeight: "700" },
   labelOnPrimary: { color: colors.bg },
-  labelOnAccent: { color: "#fff" },
+  labelOnAccent: { color: colors.bg },
   labelGhost: { color: colors.text },
   labelFocused: { color: colors.bg },
 });
@@ -127,7 +127,7 @@ export function PillButton({
         return [
           pillStyles.base,
           light ? pillStyles.light : pillStyles.glass,
-          (hovered || disabled) && { opacity: disabled ? 0.6 : 0.88 },
+          (disabled || (hovered && !light)) && { opacity: disabled ? 0.6 : 0.88 },
           focused && pillStyles.focused,
         ];
       }}
@@ -167,8 +167,14 @@ const pillStyles = StyleSheet.create({
   glass: { backgroundColor: "rgba(128, 128, 128, 0.4)" },
   focused: {
     backgroundColor: "#fff",
-    borderColor: "#000",
-    transform: [{ scale: 1.08 }],
+    borderColor: "#111",
+    borderWidth: 3,
+    transform: [{ scale: 1.1 }],
+    shadowColor: "#fff",
+    shadowOpacity: 0.95,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
   },
   label: { fontSize: 16, fontWeight: "500" },
   info: {

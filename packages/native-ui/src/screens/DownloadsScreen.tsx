@@ -13,7 +13,7 @@ import {
 import { Artwork } from "../Artwork.js";
 import { Button } from "../Button.js";
 import { isTvFocused, tvFocusHighlight } from "../focus.js";
-import { ListSkeleton } from "../Skeleton.js";
+import { DownloadListSkeleton } from "../Skeleton.js";
 import { colors } from "../theme.js";
 import { measureAndScrollIntoView } from "../tvScroll.js";
 import { webBg } from "../webStyle.js";
@@ -112,7 +112,7 @@ export function DownloadsScreen({ nav, header, focusMode = "touch" }: Pick<Scree
       {header}
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={styles.content}
         onScroll={(event) => { offset.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
-        {query.isLoading ? <ListSkeleton rows={5} /> : null}
+        {query.isLoading ? <DownloadListSkeleton rows={5} /> : null}
         {query.error ? <><Text accessibilityRole="alert" style={styles.error}>{query.error.message}</Text><Button label="Try again" onPress={() => void query.refetch()} showFocusRing={tv} /></> : null}
         {query.isSuccess && !query.data.items.length ? <Text style={styles.empty}>No downloads yet.</Text> : null}
         {(query.data?.items ?? []).map((item) => (

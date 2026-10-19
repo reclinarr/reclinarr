@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { Media } from "@reclinarr/shared";
-import { resolvePlaybackForPlay } from "@reclinarr/client";
+import { resolvePlaybackForPlay, trackTelemetry } from "@reclinarr/client";
 import type { PlayNavParams, ScreenNav } from "../screens/types.js";
 
 export function usePlayMedia(nav: Pick<ScreenNav, "openPlayer" | "openDetails">) {
   const [bufferStatus, setBufferStatus] = useState<string | null>(null);
 
   const playMedia = useMutation({
-    mutationFn: (media: Media) =>
-      resolvePlaybackForPlay(media.identity, {
+    mutationFn: async (media: Media) => {
+      const started = typeof performance !== "undefined" ? performance.now() : Date.now();
+      try {
+        const source = await resolvePlaybackForPlay(media.identity, {
         meta: media.metadata,
         onBuffering: ({ bytesDownloaded = 0, totalBytes }) => {
           if (totalBytes && totalBytes > 0) {
@@ -20,7 +22,24 @@ export function usePlayMedia(nav: Pick<ScreenNav, "openPlayer" | "openDetails">)
             setBufferStatus(`Buffering… ${Math.round(bytesDownloaded / 1_000_000)} MB`);
           }
         },
-      }).then((source) => ({ source, media })),
+        });
+        const ended = typeof performance !== "undefined" ? performance.now() : Date.now();
+        trackTelemetry("client.playback_milestone", {
+          milestone: "source_ready",
+          duration_ms: Math.round(ended - started),
+          media_kind: "vod",
+        });
+        return { source, media };
+      } catch (error) {
+        const ended = typeof performance !== "undefined" ? performance.now() : Date.now();
+        trackTelemetry("client.playback_milestone", {
+          milestone: "resolve_failed",
+          duration_ms: Math.round(ended - started),
+          media_kind: "vod",
+        });
+        throw error;
+      }
+    },
     onSuccess: ({ source, media }) => {
       setBufferStatus(null);
       const params: PlayNavParams = {

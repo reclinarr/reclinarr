@@ -7,6 +7,7 @@ import { ScreenHeader } from "../components/ScreenHeader";
 import { clearSession } from "../session";
 import { colors } from "../theme";
 import type { Nav } from "../nav";
+import { AnalyticsConsentSettings } from "@reclinarr/native-ui";
 
 export function ProfileScreen() {
   const navigation = useNavigation<Nav>();
@@ -35,6 +36,7 @@ export function ProfileScreen() {
       <View style={styles.body}>
         <Text style={styles.name}>{username || "Signed in"}</Text>
         <Text style={styles.copy}>Downloads, requests, and server settings.</Text>
+        {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
         <Button label="Downloads" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
         <View style={{ height: 10 }} />
         <Button label="Requests" variant="ghost" onPress={() => navigation.navigate("Requests")} />

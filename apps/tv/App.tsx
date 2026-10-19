@@ -1,12 +1,12 @@
 import { type JSX, useEffect } from "react";
-import { NavigationContainer, useNavigation } from "@react-navigation/native";
+import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { me } from "@reclinarr/client";
 import { StatusBar } from "expo-status-bar";
 import type { Nav, RootStackParamList } from "./src/nav";
 import { attachClient, loadServerUrl } from "./src/session";
-import { webBg } from "@reclinarr/native-ui";
+import { AnalyticsConsentGate, webBg } from "@reclinarr/native-ui";
 import { BootSkeleton } from "./src/components/Skeleton";
 import { ServerScreen } from "./src/screens/ServerScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -52,14 +52,20 @@ function BootScreen() {
 function withUser(Screen: (props: { username: string }) => JSX.Element) {
   return function Wrapped() {
     const navigation = useNavigation<Nav>();
+    const focused = useIsFocused();
+    const route = useRoute();
     const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
     useEffect(() => {
       if (session.isError) {
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });
       }
     }, [navigation, session.isError]);
-    if (session.isLoading || session.isError) return <Loading />;
-    return <Screen username={session.data?.user.username ?? ""} />;
+    if (session.isLoading || session.isError || !session.data?.user) return <Loading />;
+    return (
+      <AnalyticsConsentGate userId={session.data.user.id} screen={route.name.toLowerCase()} active={focused}>
+        <Screen username={session.data.user.username ?? ""} />
+      </AnalyticsConsentGate>
+    );
   };
 }
 

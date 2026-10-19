@@ -8,14 +8,15 @@ import {
   RequestsScreen as SharedRequests,
   SearchScreen as SharedSearch,
   PlayerScreen as SharedPlayer,
+  AnalyticsConsentSettings,
 } from "@reclinarr/native-ui";
 import { WebVideoSurface } from "@reclinarr/player-web";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { logout, playLiveChannel } from "@reclinarr/client";
+import { logout, me, playLiveChannel } from "@reclinarr/client";
 import { colors } from "@reclinarr/native-ui";
 import { WebChrome } from "./components/WebChrome";
 import { useWebLayout } from "./layout";
@@ -366,11 +367,13 @@ function formatResumeClock(seconds: number): string {
 export function ProfileScreen({ username }: { username: string }) {
   const navigation = useNavigation<Nav>();
   const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
   return (
     <WebChrome username={username}>
       <View style={[styles.profile, { paddingTop: 68 + 36 }]}>
         <Text style={styles.h1}>Profile</Text>
         <Text style={styles.copy}>Signed in as {username}</Text>
+        {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
         <Pressable
           style={styles.btn}
           onPress={() => navigation.navigate("Downloads")}

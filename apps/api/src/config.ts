@@ -7,6 +7,8 @@ const EnvSchema = z.object({
   RECLINARR_SESSION_SECRET: z.string().min(16).default("dev-only-change-me-please"),
   RECLINARR_DATA_DIR: z.string().default("./data"),
   RECLINARR_PUBLIC_URL: z.string().default("http://localhost:8787"),
+  RECLINARR_POSTHOG_PROJECT_KEY: z.string().default(""),
+  RECLINARR_TELEMETRY_DISABLED: z.string().optional().transform((v) => v === "1" || v === "true"),
   /**
    * `nginx` — API returns X-Accel-Redirect; nginx sends media bytes.
    * `node` — API pipes upstream / local files (local Vite/dev default).

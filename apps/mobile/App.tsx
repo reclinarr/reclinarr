@@ -1,6 +1,6 @@
 import { type JSX, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { NavigationContainer, useIsFocused, useNavigation } from "@react-navigation/native";
+import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MainTabParamList, Nav, RootStackParamList } from "./src/nav";
 import { attachClient, ensureClient, loadServerUrl } from "./src/session";
+import { AnalyticsConsentGate } from "@reclinarr/native-ui";
 import { colors } from "./src/theme";
 import {
   HomeTabIcon,
@@ -78,6 +79,7 @@ function withUser(Screen: (props: { username: string }) => JSX.Element) {
   return function Wrapped() {
     const navigation = useNavigation<Nav>();
     const focused = useIsFocused();
+    const route = useRoute();
     const session = useQuery({
       queryKey: ["me"],
       queryFn: async () => {
@@ -97,7 +99,11 @@ function withUser(Screen: (props: { username: string }) => JSX.Element) {
     }, [focused]);
     if (!session.data && (session.isLoading || session.isError)) return <Loading />;
     if (!session.data) return <Loading />;
-    return <Screen username={session.data.user.username ?? ""} />;
+    return (
+      <AnalyticsConsentGate userId={session.data.user.id} screen={route.name.toLowerCase()} active={focused}>
+        <Screen username={session.data.user.username ?? ""} />
+      </AnalyticsConsentGate>
+    );
   };
 }
 

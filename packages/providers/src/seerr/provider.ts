@@ -323,28 +323,29 @@ export class SeerrProvider implements DiscoveryProvider, RequestProvider {
       schema: SeerrRequestListSchema,
     });
     const results = data.results ?? [];
-    const items = await Promise.all(results.map((r) => this.mapRequestSummary(r)));
+    // The request-list payload is already paginated and includes media metadata.
+    // Avoid a details request per row: that turned one page into dozens of serial
+    // upstream calls and made the list feel unresponsive.
+    const items = results.map((r) => this.mapRequestSummary(r));
     return {
       items,
       total: data.pageInfo?.results ?? items.length,
     };
   }
 
-  private async mapRequestSummary(req: SeerrMediaRequest): Promise<MediaRequestSummary> {
+  private mapRequestSummary(req: SeerrMediaRequest): MediaRequestSummary {
     const mediaTypeRaw = (req.type || req.media?.mediaType || "movie").toLowerCase();
     const mediaType: "movie" | "tv" = mediaTypeRaw === "tv" ? "tv" : "movie";
     const tmdbId = req.media?.tmdbId;
-    let title = `${mediaType === "tv" ? "Series" : "Movie"} ${tmdbId ?? req.id}`;
-    let year: number | undefined;
-    let posterUrl: string | undefined;
-    if (tmdbId && this.getDetails) {
-      const details = await this.getDetails(mediaType, tmdbId).catch(() => null);
-      if (details) {
-        title = details.metadata.title;
-        year = details.metadata.year;
-        posterUrl = details.metadata.posterUrl;
-      }
-    }
+    const title = req.media?.title || req.media?.name || `${mediaType === "tv" ? "Series" : "Movie"} ${tmdbId ?? req.id}`;
+    const date = mediaType === "tv" ? req.media?.firstAirDate : req.media?.releaseDate;
+    const yearMatch = date?.match(/^(\d{4})/);
+    const year = yearMatch ? Number(yearMatch[1]) : undefined;
+    const posterUrl = req.media?.posterPath
+      ? req.media.posterPath.startsWith("http")
+        ? req.media.posterPath
+        : `https://image.tmdb.org/t/p/w342${req.media.posterPath}`
+      : undefined;
     const status =
       REQUEST_STATUS_LABEL[req.status ?? 0] ??
       (req.status != null ? String(req.status) : "UNKNOWN");

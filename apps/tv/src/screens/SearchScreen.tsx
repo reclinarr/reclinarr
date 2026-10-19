@@ -25,11 +25,11 @@ export function SearchScreen({ username }: { username: string }) {
               paddingHorizontal: 16,
               paddingVertical: 12,
               borderRadius: 4,
-              marginBottom: 20,
+              marginBottom: 0,
             }}
             value={value}
             onChangeText={onChangeText}
-            placeholder="Titles, people, genres"
+            placeholder="Search movies and series"
             placeholderTextColor="#b3b3b3"
             autoCapitalize="none"
             autoCorrect={false}

@@ -68,5 +68,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   profileSpacer: { width: 34 },
-  profileText: { color: colors.text, fontWeight: "700" },
+  profileText: { color: colors.bg, fontWeight: "700" },
 });

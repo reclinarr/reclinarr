@@ -4,13 +4,23 @@ import { loadConfig } from "./config.js";
 import { createAppContext } from "./context.js";
 import { buildApp } from "./app.js";
 import { startHlsPackager } from "./services/hls-packager.js";
+import { readSetupConfig } from "./setup-store.js";
+import { randomBytes } from "node:crypto";
+import { writeSetupConfig } from "./setup-store.js";
 
 // Load monorepo root .env (apps/api/../../.env)
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
 loadEnv({ path: resolve(process.cwd(), ".env") });
 
 async function main() {
-  const config = loadConfig();
+  // Environment variables always win over values entered in the setup wizard.
+  const dataDir = process.env.RECLINARR_DATA_DIR ?? process.env.STREAMERR_DATA_DIR ?? "./data";
+  const stored = readSetupConfig(dataDir);
+  if (!process.env.RECLINARR_SESSION_SECRET && !process.env.STREAMERR_SESSION_SECRET && !stored.RECLINARR_SESSION_SECRET) {
+    stored.RECLINARR_SESSION_SECRET = randomBytes(32).toString("hex");
+    writeSetupConfig(dataDir, stored);
+  }
+  const config = loadConfig({ ...stored, ...process.env });
   const ctx = createAppContext(config);
   const app = await buildApp(ctx);
 

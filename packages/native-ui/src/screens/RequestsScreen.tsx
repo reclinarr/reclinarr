@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } fr
 import { useQuery } from "@tanstack/react-query";
 import { listRequests } from "@reclinarr/client";
 import { isTvFocused, tvFocusHighlight } from "../focus.js";
-import { ListSkeleton } from "../Skeleton.js";
+import { RequestListSkeleton } from "../Skeleton.js";
 import { colors } from "../theme.js";
 import { webBg } from "../webStyle.js";
 import { Button } from "../Button.js";
@@ -21,9 +21,10 @@ export function RequestsScreen({
   const offset = useRef(0);
   const rows = useRef<Record<number, View | null>>({});
   const { height } = useWindowDimensions();
+  const pageSize = 25;
   const query = useQuery({
     queryKey: ["requests", page],
-    queryFn: () => listRequests({ take: 50, skip: page * 50 }),
+    queryFn: () => listRequests({ take: pageSize, skip: page * pageSize }),
     refetchInterval: 30_000,
   });
 
@@ -32,7 +33,7 @@ export function RequestsScreen({
       {header}
       <ScrollView ref={scroll} style={styles.body} contentContainerStyle={{ paddingBottom: 48 }}
         onScroll={(event) => { offset.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
-        {query.isLoading ? <ListSkeleton rows={6} /> : null}
+        {query.isLoading ? <RequestListSkeleton rows={6} /> : null}
         {query.error ? <><Text accessibilityRole="alert" style={{ color: colors.danger }}>{query.error.message}</Text><Button label="Try again" onPress={() => void query.refetch()} showFocusRing={tv} /></> : null}
         {(query.data?.items ?? []).length === 0 && query.isSuccess ? (
           <Text style={styles.empty}>No requests yet.</Text>
@@ -65,7 +66,7 @@ export function RequestsScreen({
         ))}
         <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
           {page > 0 ? <Button label="Previous" showFocusRing={tv} onPress={() => { setPage(page - 1); scroll.current?.scrollTo({ y: 0 }); }} /> : null}
-          {(query.data?.total ?? 0) > (page + 1) * 50 ? <Button label="Next" showFocusRing={tv} onPress={() => { setPage(page + 1); scroll.current?.scrollTo({ y: 0 }); }} /> : null}
+          {(query.data?.total ?? 0) > (page + 1) * pageSize ? <Button label="Next" showFocusRing={tv} onPress={() => { setPage(page + 1); scroll.current?.scrollTo({ y: 0 }); }} /> : null}
         </View>
       </ScrollView>
     </View>

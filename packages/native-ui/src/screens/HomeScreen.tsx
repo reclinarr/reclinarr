@@ -35,6 +35,7 @@ export function HomeScreen({
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(0);
   const railRefs = useRef<Record<string, View | null>>({});
+  const focusedRail = useRef<string | null>(null);
   const tv = focusMode === "tv";
   const web = appearance === "web";
 
@@ -50,6 +51,12 @@ export function HomeScreen({
     measureAndScrollIntoView(railRefs.current[rowId], scrollRef, scrollY, layout.height ?? 0, {
       topInset: layout.headerH ?? 0,
     });
+  }
+
+  function onRailCardFocus(rowId: string) {
+    if (focusedRail.current === rowId) return;
+    focusedRail.current = rowId;
+    ensureRailVisible(rowId);
   }
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -134,7 +141,7 @@ export function HomeScreen({
             ranked={row.id === "top10"}
             onOpen={open}
             onPlay={(media) => playMedia.mutate(media)}
-            onFocusCard={tv ? () => ensureRailVisible(row.id) : undefined}
+            onFocusCard={tv ? () => onRailCardFocus(row.id) : undefined}
             preferFirst={tv && rowIndex === 0 && !featured}
             railRef={tv ? (r) => { railRefs.current[row.id] = r; } : undefined}
           />

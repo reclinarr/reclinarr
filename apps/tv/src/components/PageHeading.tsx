@@ -1,10 +1,10 @@
 import { StyleSheet, Text, View } from "react-native";
 import { useTvLayout } from "../layout";
 
-export function PageHeading({ title }: { title: string }) {
+export function PageHeading({ title, compact = false }: { title: string; compact?: boolean }) {
   const layout = useTvLayout();
   return (
-    <View style={{ paddingTop: layout.headerH + 28, paddingHorizontal: layout.pageX, paddingBottom: 8 }}>
+    <View style={{ paddingTop: layout.headerH + (compact ? 10 : 28), paddingHorizontal: layout.pageX, paddingBottom: compact ? 2 : 8 }}>
       <Text style={styles.pageTitle}>{title}</Text>
     </View>
   );

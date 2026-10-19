@@ -13,7 +13,21 @@ import {
   playbackMediaUrl,
   textSubtitles,
 } from "@reclinarr/client";
+import { isBehindLiveWindowError } from "@reclinarr/shared";
 import type { VideoSurfaceProps } from "@reclinarr/native-ui";
+
+/** Keep ExoPlayer near the live edge so short sliding windows don't lag behind. */
+const LIVE_BUFFER_CONFIG = {
+  minBufferMs: 2_000,
+  maxBufferMs: 8_000,
+  bufferForPlaybackMs: 1_000,
+  bufferForPlaybackAfterRebufferMs: 2_000,
+  live: {
+    targetOffsetMs: 3_000,
+    minOffsetMs: 1_500,
+    maxOffsetMs: 10_000,
+  },
+} as const;
 
 export function NativeVideoSurface(props: VideoSurfaceProps) {
   const ref = useRef<VideoRef>(null);
@@ -61,6 +75,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         headers: props.headers,
         ...(videoType ? { type: videoType } : {}),
         textTracks: sideloaded,
+        ...(props.isLive ? { bufferConfig: LIVE_BUFFER_CONFIG } : {}),
       }}
       style={StyleSheet.absoluteFill}
       paused={props.paused}
@@ -80,7 +95,13 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
       }
       onBuffer={(e) => props.onBuffer?.({ isBuffering: e.isBuffering })}
       onEnd={props.onEnd}
-      onError={(e) => props.onError(e.error?.errorString ?? "Playback failed")}
+      onError={(e) => {
+        const detail = e.error?.errorString ?? "Playback failed";
+        const code = e.error?.errorCode ?? e.error?.code;
+        // Native ExoPlayer already seekToDefaultPosition + prepare for this.
+        if (isBehindLiveWindowError(detail, code)) return;
+        props.onError(detail);
+      }}
       selectedTextTrack={selectedTextTrack}
       reportBandwidth
       ignoreSilentSwitch="ignore"

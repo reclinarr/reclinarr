@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Image, type ImageResizeMode, type ImageStyle, type StyleProp } from "react-native";
-import { SESSION_COOKIE, SESSION_HEADER, tryGetClient } from "@reclinarr/client";
+import { SESSION_COOKIE, SESSION_HEADER, trackTelemetry, tryGetClient } from "@reclinarr/client";
 
 /**
  * Proxied `/api/images/*` URLs need the session. RN Image often drops custom headers
@@ -76,6 +76,9 @@ export function Artwork({
   maxWidth?: number;
   onError?: () => void;
 }) {
+  const startedAt = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
+  const sampled = useRef(Math.random() < 0.1);
+  const collectMetrics = useRef(tryGetClient()?.analyticsActive() ?? false);
   const auth = useSessionAuth();
   const uri = artworkUri(url, maxWidth, auth?.sessionId);
   if (!uri || !auth) return null;
@@ -85,7 +88,25 @@ export function Artwork({
       style={style}
       resizeMode={resizeMode}
       resizeMethod="resize"
-      onError={onError}
+      onLoad={() => {
+        if (sampled.current && collectMetrics.current) {
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          trackTelemetry("client.artwork_result", {
+            duration_ms: Math.round(now - startedAt.current),
+            outcome: "success",
+          });
+        }
+      }}
+      onError={() => {
+        if (sampled.current && collectMetrics.current) {
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          trackTelemetry("client.artwork_result", {
+            duration_ms: Math.round(now - startedAt.current),
+            outcome: "failure",
+          });
+        }
+        onError?.();
+      }}
     />
   );
 }

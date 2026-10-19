@@ -4,9 +4,9 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "dev": "expo start --web --port 5173",
-    "start": "expo start --web --port 5173",
-    "build": "expo export -p web --output-dir dist",
+    "dev": "node ../../scripts/with-expo-env.mjs expo start --web --port 5173",
+    "start": "node ../../scripts/with-expo-env.mjs expo start --web --port 5173",
+    "build": "node ../../scripts/with-expo-env.mjs expo export -p web --output-dir dist",
     "postbuild": "node scripts/finalize-export.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo 'no tests'",

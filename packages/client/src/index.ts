@@ -5,6 +5,7 @@ export {
   configureClient,
   getClient,
   tryGetClient,
+  trackTelemetry,
   login,
   logout,
   me,

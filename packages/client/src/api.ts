@@ -28,6 +28,8 @@ export interface ReclinarrClientOptions {
   getSessionId?: () => string | null | Promise<string | null>;
   setSessionId?: (id: string | null) => void | Promise<void>;
   storage?: KeyValueStorage;
+  appVersion?: string;
+  posthogProjectKey?: string;
 }
 
 const PLAY_BUFFER_POLL_MS = 500;
@@ -37,6 +39,66 @@ const BW_PROBE_TTL_MS = 5 * 60_000;
 const BW_PROBE_HEADROOM = 0.65;
 const BW_MIN = 2_000_000;
 const BW_MAX = 20_000_000;
+const POSTHOG_BATCH_URL = "https://eu.i.posthog.com/batch/";
+const TELEMETRY_EVENTS = new Set([
+  "client.api_operation",
+  "client.screen_view",
+  "client.playback_milestone",
+  "client.artwork_result",
+]);
+const TELEMETRY_PROPERTIES: Record<string, Set<string>> = {
+  "client.api_operation": new Set(["operation", "duration_ms", "outcome", "platform", "app_version"]),
+  "client.screen_view": new Set(["screen", "platform", "app_version"]),
+  "client.playback_milestone": new Set(["milestone", "duration_ms", "media_kind", "platform", "app_version"]),
+  "client.artwork_result": new Set(["duration_ms", "outcome", "platform", "app_version"]),
+};
+
+function createAnonymousId(): string {
+  try {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  } catch {
+    /* use the fallback */
+  }
+  return `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+}
+
+function monotonicNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+function isSafeTelemetryEvent(event: string, properties: Record<string, unknown>): boolean {
+  const allowed = TELEMETRY_PROPERTIES[event];
+  if (!TELEMETRY_EVENTS.has(event) || !allowed) return false;
+  return Object.entries(properties).every(([key, value]) => {
+    if (!allowed.has(key)) return false;
+    if (key === "duration_ms") return typeof value === "number" && Number.isFinite(value) && value >= 0;
+    if (key === "platform") return value === "web" || value === "ios" || value === "android";
+    if (key === "app_version") return typeof value === "string" && /^[0-9A-Za-z.+-]{1,32}$/.test(value);
+    if (key === "outcome") return value === "success" || value === "failure";
+    if (key === "operation") return typeof value === "string" && /^[a-z_]{2,40}$/.test(value);
+    if (key === "screen") return typeof value === "string" && /^[a-z_]{2,32}$/.test(value);
+    if (key === "milestone") return typeof value === "string" && /^[a-z_]{2,32}$/.test(value);
+    if (key === "media_kind") return value === "vod" || value === "live";
+    return false;
+  });
+}
+
+function telemetryOperation(path: string): string | null {
+  const pathname = path.split("?", 1)[0] ?? path;
+  if (pathname === "/api/home") return "home";
+  if (pathname.startsWith("/api/catalog")) return "catalog";
+  if (pathname.startsWith("/api/search")) return "search";
+  if (pathname.startsWith("/api/media/")) return "details";
+  if (pathname.startsWith("/api/playback/resolve")) return "playback_resolve";
+  if (pathname === "/api/playback/bandwidth-probe") return "bandwidth_probe";
+  if (pathname.startsWith("/api/live/")) return "live";
+  if (pathname.startsWith("/api/images/")) return "artwork";
+  if (pathname.startsWith("/api/acquisitions")) return "acquisitions";
+  if (pathname.startsWith("/api/requests") || pathname === "/api/request") return "requests";
+  return null;
+}
 
 function sessionIdFromSetCookie(header: string | null): string | null {
   if (!header) return null;
@@ -96,6 +158,16 @@ export class ReclinarrClient {
   /** In-memory session so the request after login never races AsyncStorage. */
   private memorySessionId: string | null = null;
   readonly storage?: KeyValueStorage;
+  appVersion: string;
+  private telemetryDistinctId: string | null = null;
+  private telemetryEnabled = false;
+  private telemetryAvailable: boolean | null = null;
+  private readonly telemetryProjectKey: string | null;
+  private telemetryStatusCheckedAt = 0;
+  private telemetryQueue: Array<{ event: string; properties: Record<string, unknown>; queuedAt: number }> = [];
+  private telemetryFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private telemetryFlushing = false;
+  private telemetryGeneration = 0;
 
   constructor(opts: ReclinarrClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
@@ -104,6 +176,8 @@ export class ReclinarrClient {
     this.getSessionId = opts.getSessionId;
     this.setSessionId = opts.setSessionId;
     this.storage = opts.storage;
+    this.appVersion = opts.appVersion ?? "0.1.0";
+    this.telemetryProjectKey = opts.posthogProjectKey?.trim() || null;
   }
 
   url(path: string): string {
@@ -121,24 +195,188 @@ export class ReclinarrClient {
     return sessionCookieHeader(await this.resolveSessionId());
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const sessionHeaders = await this.sessionHeaders();
-    const res = await this.fetchImpl(this.url(path), {
-      credentials: this.credentials,
-      ...init,
-      headers: {
-        Accept: "application/json",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...sessionHeaders,
-        ...init?.headers,
-      },
-    });
-    const data = await parseJsonResponse<T>(res);
-    if (!res.ok) {
-      const body = data as { error?: string };
-      throw new Error(body.error || `HTTP ${res.status}`);
+  private telemetryKey(userId: string) {
+    return `reclinarr.analytics.${encodeURIComponent(this.baseUrl)}.${encodeURIComponent(userId)}`;
+  }
+
+  async analyticsConsent(userId: string): Promise<boolean | null> {
+    try {
+      const stored = await this.storage?.getItem(this.telemetryKey(userId));
+      return stored === "enabled" ? true : stored === "disabled" ? false : null;
+    } catch {
+      return null;
     }
-    return data;
+  }
+
+  analyticsActive(): boolean {
+    return this.telemetryAvailable === true && Boolean(this.telemetryProjectKey) &&
+      this.telemetryEnabled && Boolean(this.telemetryDistinctId);
+  }
+
+  async analyticsStatus(): Promise<boolean> {
+    if (this.telemetryAvailable !== null && Date.now() - this.telemetryStatusCheckedAt < 60_000) {
+      return this.telemetryAvailable && Boolean(this.telemetryProjectKey);
+    }
+    try {
+      const response = await this.fetchImpl(this.url("/api/telemetry/status"), {
+        credentials: this.credentials,
+      });
+      if (response.ok) {
+        const body = (await response.json()) as { enabled?: unknown };
+        this.telemetryAvailable = body.enabled === true;
+        this.telemetryStatusCheckedAt = Date.now();
+      }
+    } catch {
+      // Leave unknown so a transient startup network error can be retried later.
+    }
+    return this.telemetryAvailable === true && Boolean(this.telemetryProjectKey);
+  }
+
+  async setAnalyticsConsent(userId: string, enabled: boolean): Promise<void> {
+    const key = this.telemetryKey(userId);
+    if (!enabled) this.clearActiveTelemetry();
+    try {
+      await this.storage?.setItem(key, enabled ? "enabled" : "disabled");
+      let distinctId: string | null = null;
+      if (enabled) {
+        distinctId = await this.storage?.getItem(`${key}.id`) ?? null;
+        if (!distinctId) {
+          distinctId = createAnonymousId();
+          await this.storage?.setItem(`${key}.id`, distinctId);
+        }
+      }
+      this.telemetryEnabled = enabled;
+      this.telemetryDistinctId = distinctId;
+      if (!enabled) {
+        await this.storage?.removeItem?.(`${key}.id`);
+        this.clearActiveTelemetry();
+      }
+    } catch {
+      this.clearActiveTelemetry();
+    }
+  }
+
+  async activateAnalytics(userId: string): Promise<boolean | null> {
+    const consent = await this.analyticsConsent(userId);
+    if (consent === null) {
+      this.clearActiveTelemetry();
+      return null;
+    }
+    await this.setAnalyticsConsent(userId, consent);
+    return consent;
+  }
+
+  trackTelemetry(event: string, properties: Record<string, unknown> = {}) {
+    if (!this.analyticsActive() || !isSafeTelemetryEvent(event, properties)) return;
+    if (this.telemetryQueue.length >= 100) this.telemetryQueue.shift();
+    this.telemetryQueue.push({
+      event,
+      properties: { ...properties, platform: inferDeviceProfile(), app_version: this.appVersion },
+      queuedAt: Date.now(),
+    });
+    if (this.telemetryQueue.length >= 10) void this.flushTelemetry();
+    else if (!this.telemetryFlushTimer) {
+      this.telemetryFlushTimer = setTimeout(() => void this.flushTelemetry(), 5_000);
+    }
+  }
+
+  private async flushTelemetry() {
+    if (this.telemetryFlushing) return;
+    if (this.telemetryFlushTimer) clearTimeout(this.telemetryFlushTimer);
+    this.telemetryFlushTimer = null;
+    if (!this.analyticsActive() || !this.telemetryQueue.length || !this.telemetryProjectKey) return;
+    this.telemetryFlushing = true;
+    const flushGeneration = this.telemetryGeneration;
+    const flushDistinctId = this.telemetryDistinctId;
+    const pending = this.telemetryQueue.splice(0, 50);
+    const batch = pending
+      .filter((event) => Date.now() - event.queuedAt <= 5 * 60_000)
+      .map(({ event, properties }) => ({
+        event,
+        properties: {
+          ...properties,
+          distinct_id: flushDistinctId,
+          $process_person_profile: false,
+          $geoip_disable: true,
+        },
+      }));
+    let succeeded = false;
+    if (batch.length === 0) {
+      this.telemetryFlushing = false;
+      if (this.telemetryQueue.length) void this.flushTelemetry();
+      return;
+    }
+    try {
+      const response = await this.fetchImpl(POSTHOG_BATCH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: this.telemetryProjectKey, batch }),
+      });
+      succeeded = response.ok;
+    } catch {
+      // Metrics are best effort; keep a short in-memory retry queue.
+    }
+    if (!succeeded && this.telemetryEnabled && this.telemetryGeneration === flushGeneration && this.telemetryDistinctId === flushDistinctId) {
+      this.telemetryQueue.unshift(...pending.filter((event) => Date.now() - event.queuedAt <= 5 * 60_000));
+      if (this.telemetryQueue.length > 100) this.telemetryQueue.splice(100);
+    }
+    this.telemetryFlushing = false;
+    if (this.telemetryQueue.length) {
+      if (succeeded) void this.flushTelemetry();
+      else if (!this.telemetryFlushTimer) {
+        this.telemetryFlushTimer = setTimeout(() => void this.flushTelemetry(), 10_000);
+      }
+    }
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const started = monotonicNow();
+    const telemetryEnabledAtStart = this.telemetryEnabled && Boolean(this.telemetryDistinctId);
+    const telemetryDistinctIdAtStart = this.telemetryDistinctId;
+    const sessionHeaders = await this.sessionHeaders();
+    const headers = {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...sessionHeaders,
+      ...(telemetryEnabledAtStart && telemetryDistinctIdAtStart
+        ? {
+            "x-reclinarr-telemetry-id": telemetryDistinctIdAtStart,
+            "x-reclinarr-client-platform": inferDeviceProfile(),
+            "x-reclinarr-client-version": this.appVersion,
+          }
+        : {}),
+      ...init?.headers,
+    };
+    let status = 0;
+    try {
+      const res = await this.fetchImpl(this.url(path), {
+        credentials: this.credentials,
+        ...init,
+        headers,
+      });
+      status = res.status;
+      const data = await parseJsonResponse<T>(res);
+      if (!res.ok) {
+        const body = data as { error?: string };
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      return data;
+    } finally {
+      const operation = telemetryOperation(path);
+      if (
+        operation &&
+        telemetryEnabledAtStart &&
+        this.telemetryEnabled &&
+        this.telemetryDistinctId === telemetryDistinctIdAtStart
+      ) {
+        const durationMs = Math.round(monotonicNow() - started);
+        this.trackTelemetry("client.api_operation", {
+          operation,
+          duration_ms: durationMs,
+          outcome: status >= 200 && status < 400 ? "success" : "failure",
+        });
+      }
+    }
   }
 
   async login(input: {
@@ -195,10 +433,22 @@ export class ReclinarrClient {
   }
 
   async logout() {
-    const result = await this.request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
-    this.memorySessionId = null;
-    await this.setSessionId?.(null);
-    return result;
+    try {
+      return await this.request<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    } finally {
+      this.memorySessionId = null;
+      await this.setSessionId?.(null);
+      this.clearActiveTelemetry();
+    }
+  }
+
+  private clearActiveTelemetry() {
+    this.telemetryEnabled = false;
+    this.telemetryDistinctId = null;
+    this.telemetryGeneration += 1;
+    this.telemetryQueue = [];
+    if (this.telemetryFlushTimer) clearTimeout(this.telemetryFlushTimer);
+    this.telemetryFlushTimer = null;
   }
 
   me() {
@@ -660,6 +910,7 @@ export function configureClient(opts: ReclinarrClientOptions): ReclinarrClient {
   // Re-attach with the same origin must keep the in-memory session (Metro reload /
   // LoginScreen ensureClient races used to wipe it between login() and me()).
   if (defaultClient && defaultClient.baseUrl === baseUrl) {
+    if (opts.appVersion) defaultClient.appVersion = opts.appVersion;
     return defaultClient;
   }
   defaultClient = new ReclinarrClient({ ...opts, baseUrl });
@@ -677,6 +928,14 @@ export function getClient(): ReclinarrClient {
     );
   }
   return defaultClient;
+}
+
+export function trackTelemetry(event: string, properties: Record<string, unknown> = {}): void {
+  try {
+    defaultClient?.trackTelemetry(event, properties);
+  } catch {
+    // Observability is always best effort.
+  }
 }
 
 export function login(input: {

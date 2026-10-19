@@ -21,6 +21,8 @@ import { IptvConnectionManager } from "./services/iptv-connection-manager.js";
 import { IptvProgressStore } from "./services/iptv-progress.js";
 import { LiveHlsManager } from "./services/live-hls.js";
 import { startVodCatalogSync } from "./services/vod-catalog-sync.js";
+import { TelemetryService } from "./services/telemetry.js";
+import { setProviderMetricsObserver } from "@reclinarr/providers";
 
 export interface AppContext {
   config: AppConfig;
@@ -40,6 +42,7 @@ export interface AppContext {
   iptvConnections: IptvConnectionManager;
   iptvProgress: IptvProgressStore;
   liveHls: LiveHlsManager;
+  telemetry: TelemetryService;
   /** Last authenticated Jellyfin user context used for background library scans. */
   lastLibraryUserContext?: import("@reclinarr/providers").UserContext;
   useMocks: boolean;
@@ -60,11 +63,24 @@ export function createAppContext(config: AppConfig): AppContext {
       "JELLYFIN_URL is required unless RECLINARR_USE_MOCKS=true (Seerr/Dispatcharr are configured)",
     );
   }
-  if (config.NODE_ENV === "production" && missingJellyfin && !explicitMocks) {
+  const firstRun = missingJellyfin && !config.SEERR_URL?.trim() && !config.DISPATCHARR_URL?.trim();
+  if (config.NODE_ENV === "production" && missingJellyfin && !explicitMocks && !firstRun) {
     throw new Error("JELLYFIN_URL is required in production (or set RECLINARR_USE_MOCKS=true)");
   }
   const useMocks = explicitMocks || missingJellyfin;
   const db = createDb(config.RECLINARR_DATA_DIR);
+  const telemetry = new TelemetryService(
+    config.RECLINARR_POSTHOG_PROJECT_KEY,
+    config.RECLINARR_TELEMETRY_DISABLED,
+  );
+  setProviderMetricsObserver((metric) => {
+    telemetry.captureCurrent("server.provider_operation", {
+      provider: metric.service.toLowerCase().replace(/[^a-z_]/g, "_").slice(0, 32),
+      duration_ms: Math.round(metric.durationMs),
+      ...(metric.status ? { status: metric.status } : {}),
+      outcome: metric.outcome,
+    });
+  });
   const cache = new MemoryCache();
   const sessions = new SessionService(db);
   void sessions.purgeExpired();
@@ -165,6 +181,7 @@ export function createAppContext(config: AppConfig): AppContext {
     iptvConnections,
     iptvProgress,
     liveHls,
+    telemetry,
     useMocks,
   };
 

@@ -3,6 +3,22 @@ import { ProviderError, classifyHttpStatus, redactSecrets } from "@reclinarr/sha
 
 export type FetchLike = typeof fetch;
 
+export type ProviderOperationMetric = {
+  service: string;
+  durationMs: number;
+  outcome: "success" | "failure";
+  status?: number;
+};
+
+let providerMetricsObserver: ((metric: ProviderOperationMetric) => void) | undefined;
+
+/** Install a best-effort observer; callers should keep the callback non-blocking. */
+export function setProviderMetricsObserver(
+  observer: ((metric: ProviderOperationMetric) => void) | undefined,
+): void {
+  providerMetricsObserver = observer;
+}
+
 export interface HttpClientOptions {
   baseUrl: string;
   timeoutMs: number;
@@ -62,7 +78,9 @@ export class HttpClient {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    const started = Date.now();
+    const started = typeof performance !== "undefined" ? performance.now() : Date.now();
+    let outcome: "success" | "failure" = "failure";
+    let status: number | undefined;
     try {
       const res = await this.fetchImpl(url, {
         method,
@@ -75,6 +93,7 @@ export class HttpClient {
         body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
         signal: controller.signal,
       });
+      status = res.status;
 
       const text = await res.text();
       let json: unknown = undefined;
@@ -116,6 +135,7 @@ export class HttpClient {
         data = parsed.data;
       }
 
+      outcome = res.ok || allowed.includes(res.status) ? "success" : "failure";
       return { status: res.status, data, headers: res.headers };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
@@ -133,7 +153,17 @@ export class HttpClient {
       });
     } finally {
       clearTimeout(timer);
-      void started;
+      try {
+        const ended = typeof performance !== "undefined" ? performance.now() : Date.now();
+        providerMetricsObserver?.({
+          service: this.serviceName,
+          durationMs: Math.max(0, ended - started),
+          outcome,
+          status,
+        });
+      } catch {
+        // Observability must never affect provider requests.
+      }
     }
   }
 }

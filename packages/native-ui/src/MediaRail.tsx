@@ -54,6 +54,14 @@ export function MediaRail({
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef = useRef<FlatList<Media>>(null);
+  const visibleRange = useRef({ first: 0, last: 0 });
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 5 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    const indices = viewableItems.map((item) => item.index).filter((index): index is number => index != null);
+    if (indices.length) {
+      visibleRange.current = { first: Math.min(...indices), last: Math.max(...indices) };
+    }
+  }).current;
   const stride = layout.cardWidth + layout.cardGap;
 
   function hoverIn(key: string) {
@@ -167,8 +175,10 @@ export function MediaRail({
           keyExtractor={(item, i) => cardKey(item, i)}
           getItemLayout={(_, index) => ({ length: stride, offset: stride * index, index })}
           onScrollToIndexFailed={(info) => {
-            listRef.current?.scrollToOffset({ offset: info.index * stride, animated: true });
+            listRef.current?.scrollToOffset({ offset: info.index * stride, animated: false });
           }}
+          viewabilityConfig={viewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
           ListEmptyComponent={<Text style={{ color: colors.muted, fontSize: 15 }}>Nothing here yet.</Text>}
           renderItem={({ item, index }) => (
             <PosterCard
@@ -179,11 +189,12 @@ export function MediaRail({
               borderRadius={focusRails ? 8 : showFocusRing ? 4 : 6}
               hasTVPreferredFocus={preferFirst && index === 0 ? true : undefined}
               onFocusCard={() => {
-                if (showFocusRing) {
+                const range = visibleRange.current;
+                if (showFocusRing && (index < range.first || index > range.last)) {
                   listRef.current?.scrollToIndex({
                     index,
-                    animated: true,
-                    viewPosition: 0.35,
+                    animated: false,
+                    viewPosition: index < range.first ? 0.15 : 0.75,
                   });
                 }
                 onFocusCard?.();

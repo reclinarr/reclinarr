@@ -173,6 +173,59 @@ export function DetailsSkeleton({ backdropH = 200 }: { backdropH?: number }) {
   );
 }
 
+/** Modal sized placeholder that reserves the same hero and detail sections as loaded content. */
+export function DetailsModalSkeleton({ backdropH = 280 }: { backdropH?: number }) {
+  return (
+    <View accessibilityLabel="Loading">
+      <View style={{ height: backdropH, justifyContent: "flex-end", paddingHorizontal: 28, paddingBottom: 18, gap: 10 }}>
+        <SkeletonBlock width="62%" height={32} />
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <SkeletonBlock width={112} height={40} radius={999} />
+          <SkeletonBlock width={112} height={40} radius={999} />
+        </View>
+      </View>
+      <View style={{ paddingHorizontal: 28, paddingTop: 16, gap: 12 }}>
+        <View style={{ flexDirection: "row", gap: 28 }}>
+          <View style={{ flex: 1.45, gap: 10 }}>
+            <SkeletonBlock width="52%" height={14} />
+            <SkeletonBlock width="88%" height={14} />
+            <SkeletonBlock width="76%" height={14} />
+            <SkeletonBlock width="60%" height={14} />
+          </View>
+          <View style={{ flex: 0.9, gap: 8 }}>
+            <SkeletonBlock width="88%" height={12} />
+            <SkeletonBlock width="72%" height={12} />
+            <SkeletonBlock width="80%" height={12} />
+            <SkeletonBlock width="62%" height={12} />
+          </View>
+        </View>
+        <SkeletonBlock width={120} height={20} style={{ marginTop: 10 }} />
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <SkeletonBlock width={44} height={68} />
+          <View style={{ flex: 1, gap: 8, paddingTop: 4 }}>
+            <SkeletonBlock width="58%" height={14} />
+            <SkeletonBlock width="92%" height={12} />
+            <SkeletonBlock width="76%" height={12} />
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+          {[0, 1, 2, 3].map((i) => <SkeletonBlock key={i} width="20%" height={150} />)}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export function EpisodeListSkeleton({ rows = 3 }: { rows?: number }) {
+  return <View accessibilityLabel="Loading episodes" style={{ gap: 12, marginTop: 12 }}>
+    {Array.from({ length: rows }, (_, i) => <View key={i} style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
+      <SkeletonBlock width={112} height={64} />
+      <View style={{ flex: 1, gap: 8 }}><SkeletonBlock width="52%" height={14} /><SkeletonBlock width="88%" height={12} /><SkeletonBlock width="70%" height={12} /></View>
+      <SkeletonBlock width={44} height={40} />
+    </View>)}
+  </View>;
+}
+
 export function ListSkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <View style={{ gap: 12 }} accessibilityLabel="Loading">
@@ -187,6 +240,24 @@ export function ListSkeleton({ rows = 6 }: { rows?: number }) {
       ))}
     </View>
   );
+}
+
+export function RequestListSkeleton({ rows = 6 }: { rows?: number }) {
+  return <View accessibilityLabel="Loading requests">
+    {Array.from({ length: rows }, (_, i) => <View key={i} style={{ minHeight: 58, paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.bg2, gap: 7 }}>
+      <SkeletonBlock width="48%" height={16} />
+      <SkeletonBlock width="34%" height={12} />
+    </View>)}
+  </View>;
+}
+
+export function DownloadListSkeleton({ rows = 5 }: { rows?: number }) {
+  return <View accessibilityLabel="Loading downloads" style={{ gap: 8 }}>
+    {Array.from({ length: rows }, (_, i) => <View key={i} style={{ minHeight: 90, flexDirection: "row", gap: 12, paddingVertical: 12, paddingHorizontal: 8, alignItems: "center" }}>
+      <SkeletonBlock width={96} height={54} />
+      <View style={{ flex: 1, gap: 8 }}><SkeletonBlock width="64%" height={16} /><SkeletonBlock width="45%" height={12} /><SkeletonBlock width="100%" height={3} /></View>
+    </View>)}
+  </View>;
 }
 
 export function ChannelListSkeleton({ rows = 8 }: { rows?: number }) {

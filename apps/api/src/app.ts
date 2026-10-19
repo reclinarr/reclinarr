@@ -22,6 +22,8 @@ import { registerAcquisitionRoutes } from "./routes/acquisition.js";
 import { registerLiveRoutes } from "./routes/live.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerMyListRoutes } from "./routes/mylist.js";
+import { registerSetupRoutes } from "./routes/setup.js";
+import { registerTelemetryRoutes } from "./routes/telemetry.js";
 
 function corsOrigins(publicUrl: string): true | string[] {
   try {
@@ -43,6 +45,7 @@ function corsOrigins(publicUrl: string): true | string[] {
 }
 
 export async function buildApp(ctx: AppContext) {
+  const requestStarted = new WeakMap<object, bigint>();
   const app = Fastify({
     logger: {
       level: "info",
@@ -72,8 +75,44 @@ export async function buildApp(ctx: AppContext) {
     global: false,
   });
 
+  app.addHook("onRequest", (req, _reply, done) => {
+    requestStarted.set(req, process.hrtime.bigint());
+    const header = req.headers["x-reclinarr-telemetry-id"];
+    const distinctId = Array.isArray(header) ? header[0] : header;
+    const platformHeader = req.headers["x-reclinarr-client-platform"];
+    const versionHeader = req.headers["x-reclinarr-client-version"];
+    const platform = Array.isArray(platformHeader) ? platformHeader[0] : platformHeader;
+    const appVersion = Array.isArray(versionHeader) ? versionHeader[0] : versionHeader;
+    ctx.telemetry.runWithDistinctId(
+      typeof distinctId === "string" ? distinctId : null,
+      done,
+      {
+        ...(typeof platform === "string" ? { platform } : {}),
+        ...(typeof appVersion === "string" ? { appVersion } : {}),
+      },
+    );
+  });
+  app.addHook("onResponse", (req, reply) => {
+    if (!req.session) return;
+    const operation = apiMetricOperation(req.routeOptions.url ?? "");
+    if (!operation) return;
+    const started = requestStarted.get(req);
+    const durationMs = started == null
+      ? 0
+      : Math.max(0, Math.round(Number(process.hrtime.bigint() - started) / 1_000_000));
+    ctx.telemetry.captureCurrent("server.api_operation", {
+      operation,
+      method: req.method,
+      duration_ms: durationMs,
+      status: reply.statusCode,
+      outcome: reply.statusCode < 400 ? "success" : "failure",
+    });
+  });
+
   await registerAuth(app, ctx);
   await registerHealthRoutes(app, ctx);
+  await registerSetupRoutes(app, ctx);
+  await registerTelemetryRoutes(app, ctx);
   await registerAuthRoutes(app, ctx);
   await registerHomeRoutes(app, ctx);
   await registerMediaRoutes(app, ctx);
@@ -128,4 +167,20 @@ export async function buildApp(ctx: AppContext) {
   });
 
   return app;
+}
+
+function apiMetricOperation(route: string): string | null {
+  if (route === "/api/home") return "home";
+  if (route.startsWith("/api/catalog")) return "catalog";
+  if (route.startsWith("/api/discover")) return "discover";
+  if (route.startsWith("/api/media/")) return "media_details";
+  if (route.startsWith("/api/search")) return "search";
+  if (route.startsWith("/api/playback/resolve")) return "playback_resolve";
+  if (route === "/api/playback/bandwidth-probe") return "bandwidth_probe";
+  if (route.startsWith("/api/live/")) return "live";
+  if (route.startsWith("/api/acquisition")) return "acquisition";
+  if (route.startsWith("/api/requests") || route === "/api/request") return "requests";
+  if (route.startsWith("/api/library")) return "library";
+  if (route.startsWith("/api/mylist")) return "my_list";
+  return null;
 }

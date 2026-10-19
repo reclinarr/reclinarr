@@ -7,9 +7,22 @@ import Video, {
   type OnProgressData,
   type VideoRef,
 } from "react-native-video";
-import { classifyPlayback, getClient, playbackMediaUrl } from "@reclinarr/client";
+import { classifyPlayback, getClient, playbackMediaUrl, textSubtitles } from "@reclinarr/client";
+import { isBehindLiveWindowError } from "@reclinarr/shared";
 import type { VideoSurfaceProps } from "@reclinarr/native-ui";
-import { textSubtitles } from "@reclinarr/client";
+
+/** Keep ExoPlayer near the live edge so short sliding windows don't lag behind. */
+const LIVE_BUFFER_CONFIG = {
+  minBufferMs: 2_000,
+  maxBufferMs: 8_000,
+  bufferForPlaybackMs: 1_000,
+  bufferForPlaybackAfterRebufferMs: 2_000,
+  live: {
+    targetOffsetMs: 3_000,
+    minOffsetMs: 1_500,
+    maxOffsetMs: 10_000,
+  },
+} as const;
 
 /**
  * iOS AVPlayer + react-native-video remuxes sidecar textTracks via
@@ -96,6 +109,9 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         ...(sourceHeaders ? { headers: sourceHeaders } : {}),
         ...(videoType ? { type: videoType } : {}),
         ...(sideloaded.length > 0 ? { textTracks: sideloaded } : {}),
+        ...(Platform.OS === "android" && props.isLive
+          ? { bufferConfig: LIVE_BUFFER_CONFIG }
+          : {}),
       }}
       style={StyleSheet.absoluteFill}
       paused={props.paused}
@@ -126,6 +142,9 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
           err?.localizedDescription ||
           (err?.code != null ? `code ${err.code}` : null) ||
           "Playback failed";
+        const code = err?.errorCode ?? err?.code;
+        // Native ExoPlayer already seekToDefaultPosition + prepare for this.
+        if (isBehindLiveWindowError(detail, code)) return;
         let where = "";
         try {
           const u = new URL(props.uri);

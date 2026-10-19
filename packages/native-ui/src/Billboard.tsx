@@ -134,10 +134,10 @@ export function Billboard({
             label={playLabel}
             tone="light"
             onPress={playable ? onPlay : onInfo}
-            showFocusRing={tv}
+            showFocusRing
             hasTVPreferredFocus={tv || undefined}
           />
-          <PillButton icon="info" label="More Info" tone="glass" onPress={onInfo} showFocusRing={tv} />
+          <PillButton icon="info" label="More Info" tone="glass" onPress={onInfo} showFocusRing />
           {canPreview && trailerOn ? (
             <Pressable
               onPress={() => setMuted((m) => !m)}

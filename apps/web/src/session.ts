@@ -1,4 +1,5 @@
 import type { ReclinarrClient } from "@reclinarr/client";
+import appConfig from "../app.json";
 import {
   attachClient as attach,
   clearSession as clear,
@@ -42,7 +43,12 @@ export async function clearSession(): Promise<void> {
 
 export function attachClient(baseUrl: string): ReclinarrClient {
   // Empty string is intentional for Expo proxy / same-origin API static hosting.
-  return attach(webStorage, baseUrl);
+  return attach(
+    webStorage,
+    baseUrl,
+    appConfig.expo.version,
+    process.env.EXPO_PUBLIC_POSTHOG_PROJECT_KEY,
+  );
 }
 
 /** Attach the same-origin (or env) API client. */

@@ -38,9 +38,11 @@ import {
   seriesEpisodes,
   SESSION_HEADER,
   textSubtitles,
+  trackTelemetry,
 } from "@reclinarr/client";
 import {
   formatPlaybackIoError,
+  isBehindLiveWindowError,
   type EpisodeListItem,
   type MediaIdentity,
   type PlaybackSource,
@@ -219,6 +221,7 @@ export function PlayerScreen({
   const progressStarted = useRef(false);
   /** Ignore spurious native onEnd before real playback (common on iOS HLS load failures). */
   const playbackEverProgressed = useRef(false);
+  const playbackStartAt = useRef(0);
   const mediaLoaded = useRef(false);
   const resumeApplied = useRef(false);
   const positionRef = useRef(0);
@@ -337,6 +340,7 @@ export function PlayerScreen({
     setAutoplayCountdown(null);
     progressStarted.current = false;
     playbackEverProgressed.current = false;
+    playbackStartAt.current = typeof performance !== "undefined" ? performance.now() : Date.now();
     mediaLoaded.current = false;
     resumeApplied.current = false;
     setError(null);
@@ -892,6 +896,12 @@ export function PlayerScreen({
           onProgress={({ currentTime, duration: d, playableDuration }) => {
             if (currentTime > 0.25 && !playbackEverProgressed.current) {
               playbackEverProgressed.current = true;
+              const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+              trackTelemetry("client.playback_milestone", {
+                milestone: "first_progress",
+                duration_ms: Math.round(now - playbackStartAt.current),
+                media_kind: isLive ? "live" : "vod",
+              });
               setIsBuffering(false);
               reveal();
             }
@@ -973,7 +983,20 @@ export function PlayerScreen({
               reveal(true);
             } else handleClose();
           }}
-          onError={(message) => setError(friendlyPlaybackError(message))}
+          onError={(message) => {
+            const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+            trackTelemetry("client.playback_milestone", {
+              milestone: "player_error",
+              duration_ms: Math.round(now - playbackStartAt.current),
+              media_kind: isLive ? "live" : "vod",
+            });
+            // ExoPlayer already seeks to the live edge; don't freeze the UI on it.
+            if (isBehindLiveWindowError(message)) {
+              setIsBuffering(true);
+              return;
+            }
+            setError(friendlyPlaybackError(message));
+          }}
           onSeekRequest={(seek) => {
             seekFn.current = seek;
           }}
@@ -1311,8 +1334,6 @@ export function PlayerScreen({
   );
 }
 
-const NETFLIX_RED = "#e50914";
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   chrome: {
@@ -1418,7 +1439,7 @@ const styles = StyleSheet.create({
   },
   barFill: {
     height: 3,
-    backgroundColor: NETFLIX_RED,
+    backgroundColor: colors.accent,
     borderRadius: 2,
     pointerEvents: "none",
   },
@@ -1433,7 +1454,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: NETFLIX_RED,
+    backgroundColor: colors.accent,
     pointerEvents: "none",
   },
   scrubberHot: {
@@ -1520,7 +1541,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   menuItem: { color: "#fff", fontSize: 15, paddingVertical: 6 },
-  menuItemActive: { color: NETFLIX_RED, fontWeight: "700" },
+  menuItemActive: { color: colors.accent, fontWeight: "700" },
   episodesMenu: { minWidth: 320, maxWidth: 400, maxHeight: 320 },
   seasonRow: { marginBottom: 8, maxHeight: 36 },
   seasonPill: {

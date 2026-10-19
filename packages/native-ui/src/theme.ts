@@ -5,7 +5,7 @@ export const colors = {
   bg2: "#2f2f2f",
   text: "#ffffff",
   muted: "#b3b3b3",
-  accent: "#e50914",
+  accent: "#ffb000",
   focus: "#ffffff",
   danger: "#e87c03",
 } as const;

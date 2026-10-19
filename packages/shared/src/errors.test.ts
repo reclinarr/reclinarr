@@ -3,6 +3,7 @@ import {
   IPTV_STREAM_BUSY_MESSAGE,
   formatIptvUpstreamError,
   formatPlaybackIoError,
+  isBehindLiveWindowError,
   isIptvConnectionLimitError,
 } from "./errors.js";
 
@@ -50,5 +51,24 @@ describe("formatPlaybackIoError", () => {
         msg: "IOException: type = HttpStatusCodeInvalid, code = 502, msg =",
       }),
     ).toBe(IPTV_STREAM_BUSY_MESSAGE);
+  });
+
+  it("does not map behind-live-window (native recovers)", () => {
+    expect(
+      formatPlaybackIoError({
+        msg: "ExoPlaybackException: ERROR_CODE_BEHIND_LIVE_WINDOW",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("isBehindLiveWindowError", () => {
+  it("matches ExoPlayer / rn-video strings and codes", () => {
+    expect(
+      isBehindLiveWindowError("ExoPlaybackException: ERROR_CODE_BEHIND_LIVE_WINDOW"),
+    ).toBe(true);
+    expect(isBehindLiveWindowError(null, 1002)).toBe(true);
+    expect(isBehindLiveWindowError(null, "21002")).toBe(true);
+    expect(isBehindLiveWindowError("decoder init failed")).toBe(false);
   });
 });

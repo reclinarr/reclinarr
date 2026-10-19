@@ -99,6 +99,26 @@ export function formatIptvUpstreamError(
 }
 
 /**
+ * ExoPlayer ERROR_CODE_BEHIND_LIVE_WINDOW — playhead fell outside a sliding /
+ * event HLS window. react-native-video recovers with seekToDefaultPosition +
+ * prepare, but still emits onError; treat as non-fatal in app chrome.
+ */
+export function isBehindLiveWindowError(
+  message?: string | null,
+  code?: number | string | null,
+): boolean {
+  if (
+    code === 1002 ||
+    code === "1002" ||
+    code === "21002" ||
+    (typeof code === "string" && /BEHIND_LIVE_WINDOW/i.test(code))
+  ) {
+    return true;
+  }
+  return Boolean(message && /BEHIND_LIVE_WINDOW|behind\s*live\s*window/i.test(message));
+}
+
+/**
  * Map opaque player IO failures (mpegts.js / hls.js) to a clearer IPTV message.
  */
 export function formatPlaybackIoError(info: {
@@ -115,6 +135,7 @@ export function formatPlaybackIoError(info: {
         ? Number(codeRaw)
         : undefined;
   const msg = info.msg ?? info.message ?? "";
+  if (isBehindLiveWindowError(msg, codeRaw)) return null;
   if (isIptvConnectionLimitError(code, msg) || isIptvConnectionLimitError(msg)) {
     return IPTV_STREAM_BUSY_MESSAGE;
   }

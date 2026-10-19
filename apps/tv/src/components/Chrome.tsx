@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pressable, StyleSheet, Text, TVFocusGuideView, View } from "react-native";
 import {
   useIsFocused,
@@ -7,8 +7,8 @@ import {
   useNavigationState,
   useRoute,
 } from "@react-navigation/native";
-import { logout } from "@reclinarr/client";
-import { BrandLogo, Shade, isTvFocused, webBg } from "@reclinarr/native-ui";
+import { logout, me } from "@reclinarr/client";
+import { AnalyticsConsentSettings, BrandLogo, Shade, colors, isTvFocused, webBg } from "@reclinarr/native-ui";
 import type { Nav, RootStackParamList } from "../nav";
 import { useTvLayout } from "../layout";
 import { clearSession } from "../session";
@@ -37,6 +37,7 @@ export function Chrome({
 }) {
   const navigation = useNavigation<Nav>();
   const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
   const route = useRoute();
   const isFocused = useIsFocused();
   // transparentModal can leave the underlying screen "focused" for rendering —
@@ -68,7 +69,6 @@ export function Chrome({
     // so D-pad cannot move selection on Home/Catalog behind the modal.
     <TVFocusGuideView
       style={[styles.shell, { pointerEvents: canFocus ? "auto" : "none" }]}
-      focusable={canFocus}
     >
       {menuOpen ? (
         <Pressable style={styles.dismiss} onPress={() => setMenuOpen(false)} />
@@ -92,6 +92,7 @@ export function Chrome({
               <Pressable
                 key={link.name}
                 onPress={() => navigation.navigate(link.name as never)}
+                hasTVPreferredFocus={canFocus && active}
                 style={(s) => [
                   styles.link,
                   active && styles.linkActive,
@@ -136,6 +137,11 @@ export function Chrome({
             {menuOpen ? (
               <View style={styles.menu}>
                 <Text style={styles.menuName}>{username || "Profile"}</Text>
+                {session.data?.user.id ? (
+                  <View style={{ paddingHorizontal: 14 }}>
+                    <AnalyticsConsentSettings userId={session.data.user.id} />
+                  </View>
+                ) : null}
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
                   onPress={() => {
@@ -269,7 +275,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 4,
-    backgroundColor: "#e50914",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
@@ -279,7 +285,7 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
     transform: [{ scale: 1.12 }],
   },
-  avatarText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  avatarText: { color: colors.bg, fontWeight: "700", fontSize: 15 },
   menu: {
     position: "absolute",
     top: 44,
