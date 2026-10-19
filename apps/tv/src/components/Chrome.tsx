@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Pressable, StyleSheet, Text, TVFocusGuideView, View } from "react-native";
 import {
   useIsFocused,
@@ -7,8 +7,8 @@ import {
   useNavigationState,
   useRoute,
 } from "@react-navigation/native";
-import { logout, me } from "@reclinarr/client";
-import { AnalyticsConsentSettings, BrandLogo, Shade, colors, isTvFocused, webBg } from "@reclinarr/native-ui";
+import { logout } from "@reclinarr/client";
+import { BrandLogo, Shade, colors, isTvFocused, webBg } from "@reclinarr/native-ui";
 import type { Nav, RootStackParamList } from "../nav";
 import { useTvLayout } from "../layout";
 import { clearSession } from "../session";
@@ -37,7 +37,6 @@ export function Chrome({
 }) {
   const navigation = useNavigation<Nav>();
   const queryClient = useQueryClient();
-  const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
   const route = useRoute();
   const isFocused = useIsFocused();
   // transparentModal can leave the underlying screen "focused" for rendering —
@@ -137,11 +136,6 @@ export function Chrome({
             {menuOpen ? (
               <View style={styles.menu}>
                 <Text style={styles.menuName}>{username || "Profile"}</Text>
-                {session.data?.user.id ? (
-                  <View style={{ paddingHorizontal: 14 }}>
-                    <AnalyticsConsentSettings userId={session.data.user.id} />
-                  </View>
-                ) : null}
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
                   onPress={() => {
@@ -154,6 +148,21 @@ export function Chrome({
                       style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
                     >
                       Downloads
+                    </Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    navigation.navigate("Settings");
+                  }}
+                >
+                  {(state) => (
+                    <Text
+                      style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
+                    >
+                      Settings
                     </Text>
                   )}
                 </Pressable>
@@ -224,7 +233,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    overflow: "hidden",
   },
   headerSolid: { backgroundColor: webBg },
   wordmarkBtn: {

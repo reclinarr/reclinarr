@@ -53,6 +53,16 @@ const TELEMETRY_PROPERTIES: Record<string, Set<string>> = {
   "client.artwork_result": new Set(["duration_ms", "outcome", "platform", "app_version"]),
 };
 
+function safeExceptionMessage(error: unknown): { type: string; value: string; stacktrace?: { frames: Array<{ filename: string; lineno?: number; function?: string }> } } {
+  const err = error instanceof Error ? error : new Error(String(error));
+  const clean = (value: string) => value.replace(/https?:\/\/[^\s)]+/g, "[url]").replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[email]").slice(0, 500);
+  const frames = (err.stack ?? "").split("\n").slice(1, 21).map((line) => {
+    const match = line.match(/(?:at\s+(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/);
+    return match ? { filename: clean(match[2]!), lineno: Number(match[3]), function: clean(match[1] ?? "") } : null;
+  }).filter((frame): frame is NonNullable<typeof frame> => frame !== null);
+  return { type: clean(err.name || "Error"), value: clean(err.message || "Unhandled exception"), ...(frames.length ? { stacktrace: { frames } } : {}) };
+}
+
 function createAnonymousId(): string {
   try {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -278,6 +288,19 @@ export class ReclinarrClient {
     else if (!this.telemetryFlushTimer) {
       this.telemetryFlushTimer = setTimeout(() => void this.flushTelemetry(), 5_000);
     }
+  }
+
+  captureException(error: unknown) {
+    if (!this.analyticsActive()) return;
+    const exception = safeExceptionMessage(error);
+    const event = "$exception";
+    if (this.telemetryQueue.length >= 100) this.telemetryQueue.shift();
+    this.telemetryQueue.push({
+      event,
+      properties: { $exception_list: [{ ...exception, mechanism: { handled: false, type: "generic" } }], platform: inferDeviceProfile(), app_version: this.appVersion },
+      queuedAt: Date.now(),
+    });
+    void this.flushTelemetry();
   }
 
   private async flushTelemetry() {

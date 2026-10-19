@@ -16,7 +16,9 @@ const MetricSchema = z.object({
 const BatchSchema = z.object({ events: z.array(MetricSchema).max(50) });
 
 export async function registerTelemetryRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  app.get("/api/telemetry/status", async () => ({ enabled: ctx.telemetry.enabled }));
+  // Clients bundle the public project token and send their own events. This flag
+  // only applies the installation-wide opt-out; server capture still needs a key.
+  app.get("/api/telemetry/status", async () => ({ enabled: !ctx.config.RECLINARR_TELEMETRY_DISABLED }));
 
   app.post(
     "/api/telemetry/events",

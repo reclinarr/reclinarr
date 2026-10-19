@@ -17,6 +17,7 @@ import { DetailsScreen } from "./src/screens/DetailsScreen";
 import { LiveScreen } from "./src/screens/LiveScreen";
 import { DownloadsScreen } from "./src/screens/DownloadsScreen";
 import { RequestsScreen } from "./src/screens/RequestsScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { PlayerScreen } from "./src/screens/PlayerScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -76,6 +77,7 @@ const Search = withUser(SearchScreen);
 const Live = withUser(LiveScreen);
 const Downloads = withUser(DownloadsScreen);
 const Requests = withUser(RequestsScreen);
+const Settings = withUser(SettingsScreen);
 const Details = withUser(DetailsScreen);
 
 export function App() {
@@ -101,6 +103,7 @@ export function App() {
           <Stack.Screen name="Live" component={Live} />
           <Stack.Screen name="Downloads" component={Downloads} />
           <Stack.Screen name="Requests" component={Requests} />
+          <Stack.Screen name="Settings" component={Settings} />
           <Stack.Screen
             name="Details"
             component={Details}

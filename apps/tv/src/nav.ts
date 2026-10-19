@@ -28,6 +28,7 @@ export type RootStackParamList = {
   Live: undefined;
   Downloads: undefined;
   Requests: undefined;
+  Settings: undefined;
   Details: DetailsParams;
   Player: PlayParams;
 };
