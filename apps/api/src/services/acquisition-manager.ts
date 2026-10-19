@@ -49,8 +49,18 @@ export class AcquisitionManager {
     this.iptvConnections = deps?.iptvConnections;
     this.cacheManager = deps?.cacheManager;
     this.cacheTtlMs = deps?.cacheTtlMs ?? 7 * 24 * 60 * 60 * 1000;
-    // Mark interrupted downloads as failed-but-resumable on boot.
-    // Orphaned "playable" rows (download task gone) become failed so CacheManager can evict them.
+  }
+
+  /**
+   * API process boot only: mark in-flight rows failed-but-resumable so CacheManager
+   * can evict orphans after a crash.
+   *
+   * Must NOT run in the Docker HLS packager sidecar — that process shares the same
+   * SQLite DB and would fail live downloads the API is still writing, which drops
+   * them from listPackagerJobs() and blocks play-while-download.
+   */
+  failInterruptedOnBoot(): number {
+    let failed = 0;
     for (const row of this.db.select().from(acquisitionsTable).all()) {
       if (row.state === "downloading" || row.state === "queued" || row.state === "playable") {
         this.db
@@ -58,8 +68,10 @@ export class AcquisitionManager {
           .set({ state: "failed", updatedAt: new Date().toISOString() })
           .where(eq(acquisitionsTable.id, row.id))
           .run();
+        failed += 1;
       }
     }
+    return failed;
   }
 
   /** Called after a file lands in the library folder (promote or library-mode download). */

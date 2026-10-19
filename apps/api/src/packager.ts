@@ -1,7 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
-import { createAppContext } from "./context.js";
+import { createPackagerContext } from "./context.js";
 import { startHlsPackager } from "./services/hls-packager.js";
 
 loadEnv({ path: resolve(process.cwd(), "../../.env") });
@@ -9,12 +9,9 @@ loadEnv({ path: resolve(process.cwd(), ".env") });
 
 async function main() {
   const config = loadConfig();
-  if (config.FFMPEG_PATH) process.env.FFMPEG_PATH = config.FFMPEG_PATH;
-  if (config.FFPROBE_PATH) process.env.FFPROBE_PATH = config.FFPROBE_PATH;
-
-  const ctx = createAppContext(config);
+  const ctx = createPackagerContext(config);
   const packager = startHlsPackager(
-    config.RECLINARR_DATA_DIR,
+    ctx.dataDir,
     {
       listActive: () => ctx.acquisitions.listPackagerJobs(),
       markHlsReady: (id) => ctx.acquisitions.markHlsReady(id),
@@ -23,7 +20,7 @@ async function main() {
   );
 
   console.info("[packager] HLS packager running", {
-    dataDir: config.RECLINARR_DATA_DIR,
+    dataDir: ctx.dataDir,
   });
 
   const shutdown = () => {

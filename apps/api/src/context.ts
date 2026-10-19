@@ -131,6 +131,11 @@ export function createAppContext(config: AppConfig): AppContext {
       cacheTtlMs: config.RECLINARR_CACHE_TTL_MS,
     },
   );
+  // Only the API owns download workers — reap orphans here, never in the packager sidecar.
+  const orphaned = acquisitions.failInterruptedOnBoot();
+  if (orphaned > 0) {
+    console.info(`[acquisitions] marked ${orphaned} interrupted job(s) failed on boot`);
+  }
   const iptvProgress = new IptvProgressStore(db);
   const playbackResolver = new PlaybackResolver(
     jellyfin,
@@ -221,4 +226,24 @@ export function createAppContext(config: AppConfig): AppContext {
   });
 
   return ctx;
+}
+
+/**
+ * Minimal context for the Docker HLS packager process.
+ * Shares SQLite with the API but must not reap in-flight acquisitions, start Live HLS,
+ * run VOD sync, or evict cache — those belong to the API process only.
+ */
+export function createPackagerContext(config: AppConfig): {
+  acquisitions: AcquisitionManager;
+  dataDir: string;
+} {
+  if (config.FFMPEG_PATH) process.env.FFMPEG_PATH = config.FFMPEG_PATH;
+  if (config.FFPROBE_PATH) process.env.FFPROBE_PATH = config.FFPROBE_PATH;
+  const db = createDb(config.RECLINARR_DATA_DIR);
+  const acquisitions = new AcquisitionManager(
+    config.RECLINARR_DATA_DIR,
+    new MockDispatcharrProvider(),
+    db,
+  );
+  return { acquisitions, dataDir: config.RECLINARR_DATA_DIR };
 }
