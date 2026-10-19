@@ -9,6 +9,8 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        EXPO_PUBLIC_POSTHOG_PROJECT_KEY: ${EXPO_PUBLIC_POSTHOG_PROJECT_KEY:-${RECLINARR_POSTHOG_PROJECT_KEY:-}}
     image: reclinarr:local
     container_name: reclinarr
     ports:

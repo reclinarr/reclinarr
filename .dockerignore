@@ -29,6 +29,5 @@ docs
 apps/tv
 **/*.test.ts
 **/vitest.config.ts
-scripts
 LICENSE
 README.md

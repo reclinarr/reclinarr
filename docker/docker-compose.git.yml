@@ -13,6 +13,8 @@ services:
     build:
       context: https://github.com/fearlessfara/streamerr.git#main
       dockerfile: Dockerfile
+      args:
+        EXPO_PUBLIC_POSTHOG_PROJECT_KEY: ${EXPO_PUBLIC_POSTHOG_PROJECT_KEY:-${RECLINARR_POSTHOG_PROJECT_KEY:-}}
     image: reclinarr:git
     container_name: reclinarr
     ports:

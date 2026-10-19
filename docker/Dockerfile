@@ -11,12 +11,16 @@ RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
 COPY apps ./apps
 COPY packages ./packages
+COPY scripts/with-expo-env.mjs ./scripts/with-expo-env.mjs
 COPY tsconfig.base.json ./
+# TV app is excluded from the image; stub the workspace so npm install succeeds.
+RUN mkdir -p apps/tv && printf '%s\n' '{"name":"@reclinarr/tv","private":true,"version":"0.1.0"}' > apps/tv/package.json
 RUN npm install
 RUN npm run build -w @reclinarr/shared
 RUN npm run build -w @reclinarr/client
 RUN npm run build -w @reclinarr/providers
 RUN npm run build -w @reclinarr/api
+ARG EXPO_PUBLIC_POSTHOG_PROJECT_KEY
 RUN npm run build -w @reclinarr/web
 
 FROM node:24-alpine AS runtime
