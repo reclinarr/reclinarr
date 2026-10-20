@@ -138,6 +138,50 @@ export function requestPublicOrigin(
   return normalizePublicOrigin(`${proto}://${host}`);
 }
 
+/**
+ * Force AVPlayer to start at the beginning of cache/event playlists.
+ * Broken incremental packs used a high MEDIA-SEQUENCE; players then opened
+ * near the live edge (~25% of a full movie scrubber).
+ */
+export function normalizeCacheHlsPlaylist(playlist: string): string {
+  const lines = playlist.split("\n");
+  const out: string[] = [];
+  let sawStart = false;
+  let sawMediaSequence = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE:")) {
+      if (!sawMediaSequence) {
+        out.push("#EXT-X-MEDIA-SEQUENCE:0");
+        sawMediaSequence = true;
+      }
+      continue;
+    }
+    if (trimmed.startsWith("#EXT-X-START:")) {
+      if (!sawStart) {
+        out.push("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES");
+        sawStart = true;
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  if (!sawStart) {
+    const versionIdx = out.findIndex((l) => l.trim().startsWith("#EXT-X-VERSION:"));
+    const m3uIdx = out.findIndex((l) => l.trim() === "#EXTM3U");
+    const insertAt = versionIdx >= 0 ? versionIdx + 1 : m3uIdx >= 0 ? m3uIdx + 1 : 0;
+    out.splice(insertAt, 0, "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES");
+  }
+  if (!sawMediaSequence) {
+    const startIdx = out.findIndex((l) => l.trim().startsWith("#EXT-X-START:"));
+    const versionIdx = out.findIndex((l) => l.trim().startsWith("#EXT-X-VERSION:"));
+    const insertAt =
+      startIdx >= 0 ? startIdx + 1 : versionIdx >= 0 ? versionIdx + 1 : 1;
+    out.splice(insertAt, 0, "#EXT-X-MEDIA-SEQUENCE:0");
+  }
+  return out.join("\n");
+}
+
 /** Embed session on relative/absolute segment lines in a cache (on-disk) playlist. */
 export function embedSessionInPlaylist(playlist: string, sessionId: string): string {
   if (!sessionId) return playlist;

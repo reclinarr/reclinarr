@@ -22,6 +22,7 @@ import {
 } from "../services/media-plane.js";
 import {
   embedSessionInPlaylist,
+  normalizeCacheHlsPlaylist,
   requestPublicOrigin,
   rewriteHlsPlaylist,
 } from "../services/jellyfin-hls-rewrite.js";
@@ -347,7 +348,7 @@ export async function registerPlaybackRoutes(
 
     // Playlists must embed session on every segment URI — AVPlayer drops headers.
     if (clean.endsWith(".m3u8")) {
-      const raw = readFileSync(filePath, "utf8");
+      const raw = normalizeCacheHlsPlaylist(readFileSync(filePath, "utf8"));
       const body = req.session?.id ? embedSessionInPlaylist(raw, req.session.id) : raw;
       reply.header("Content-Type", contentTypeForHls(clean));
       reply.header("Cache-Control", "no-cache");

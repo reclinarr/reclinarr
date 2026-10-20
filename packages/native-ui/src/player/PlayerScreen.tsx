@@ -333,8 +333,13 @@ export function PlayerScreen({
 
   useEffect(() => {
     setSubtitleTracks(params.source.subtitles ?? []);
-    setPosition(params.source.startPositionSeconds ?? 0);
-    positionRef.current = params.source.startPositionSeconds ?? 0;
+    // Incomplete cache HLS used to open near the live edge; don't paint a stale
+    // resume scrubber position until onLoad can clamp to the packaged window.
+    const incompleteCache =
+      params.source.provider === "cache" && !params.source.downloadComplete;
+    const start = incompleteCache ? 0 : (params.source.startPositionSeconds ?? 0);
+    setPosition(start);
+    positionRef.current = start;
     setDuration(params.source.durationSeconds ?? 0);
     setPaused(false);
     setAutoplayCountdown(null);
@@ -365,6 +370,7 @@ export function PlayerScreen({
       const start = source.startPositionSeconds ?? 0;
       if (!(start > 30) || !(dur > 0) || !Number.isFinite(dur)) return;
       // Never seek to/past EOF — that fires onEnd before any progress on iOS HLS.
+      // Also ignore resumes past the packaged HLS window (stale live-edge progress).
       if (start >= dur - 15) {
         resumeApplied.current = true;
         return;
@@ -443,8 +449,14 @@ export function PlayerScreen({
       source.durationSeconds > 0
         ? source.durationSeconds
         : 0;
-    return source.provider === "cache" ? Math.max(fromPlayer, fromSource)
-      : fromPlayer > 0 ? fromPlayer : fromSource;
+    // Incomplete cache HLS often reports only the packaged window. Prefer the
+    // catalogue runtime for the scrubber once we know it, but never invent a
+    // longer timeline than the player while resume/seek still use fromSource.
+    if (source.provider === "cache") {
+      if (fromSource > 0) return fromSource;
+      return fromPlayer;
+    }
+    return fromPlayer > 0 ? fromPlayer : fromSource;
   })();
   const seekCap = seekCapForSource(source, knownDuration);
   positionRef.current = position;
@@ -973,7 +985,15 @@ export function PlayerScreen({
               return;
             }
             if (!isLive && knownDurationRef.current > 0 && positionRef.current < knownDurationRef.current * 0.9) {
-              setError("Playback stopped unexpectedly. Return to the title and try again.");
+              // Partial IPTV cache: AVPlayer ends when the packaged HLS window
+              // ends, which is earlier than the catalogue runtime.
+              const partialCache =
+                source.provider === "cache" && !source.downloadComplete;
+              setError(
+                partialCache
+                  ? "Reached the end of downloaded video. Wait for more cache or play again later."
+                  : "Playback stopped unexpectedly. Return to the title and try again.",
+              );
               setIsBuffering(false);
               return;
             }

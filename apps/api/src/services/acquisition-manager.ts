@@ -176,12 +176,15 @@ export class AcquisitionManager {
           (a.state === "downloading" ||
             a.state === "playable" ||
             a.state === "queued" ||
-            a.state === "completed"),
+            a.state === "completed" ||
+            // Failed partial downloads still need a contiguous finalize pass.
+            a.state === "failed"),
       )
       .map((a) => ({
         id: a.id,
         localPath: a.localPath!,
-        downloadComplete: a.state === "completed",
+        // Treat failed partials as complete so we write ENDLIST for available bytes.
+        downloadComplete: a.state === "completed" || a.state === "failed",
         bytesDownloaded: a.bytesDownloaded,
       }));
   }

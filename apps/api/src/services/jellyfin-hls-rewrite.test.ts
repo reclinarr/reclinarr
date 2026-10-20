@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isLocalPlaybackHost,
+  normalizeCacheHlsPlaylist,
   normalizePublicOrigin,
   requestPublicOrigin,
   resolveJellyfinUri,
@@ -108,5 +109,23 @@ describe("rewriteHlsPlaylist", () => {
       "https://streamerr.faraone.ovh/api/playback/jellyfin/hls?path=",
     );
     expect(out).not.toContain("http://streamerr.faraone.ovh/");
+  });
+});
+
+describe("normalizeCacheHlsPlaylist", () => {
+  it("forces MEDIA-SEQUENCE 0 and EXT-X-START at 0", () => {
+    const input = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:6",
+      "#EXT-X-TARGETDURATION:4",
+      "#EXT-X-MEDIA-SEQUENCE:800",
+      "#EXTINF:4.0,",
+      "seg_00000.ts",
+      "",
+    ].join("\n");
+    const out = normalizeCacheHlsPlaylist(input);
+    expect(out).toContain("#EXT-X-MEDIA-SEQUENCE:0");
+    expect(out).not.toContain("#EXT-X-MEDIA-SEQUENCE:800");
+    expect(out).toContain("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES");
   });
 });

@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   hlsDir,
@@ -12,6 +20,8 @@ import { isBrowserSafeAudioCodec } from "./ffmpeg-remux.js";
 const MIN_BYTES_BEFORE_PACK = 1_500_000;
 const POLL_MS = 2_000;
 const PACK_STALL_MS = 4_000;
+/** Rebuild at most this often while the file is still growing. */
+const MIN_REPACK_GROWTH_BYTES = 32 * 1024 * 1024;
 
 function ffmpegBin(): string {
   return process.env.FFMPEG_PATH?.trim() || "ffmpeg";
@@ -31,7 +41,7 @@ function ffprobeBin(): string {
 export interface PackagerJob {
   id: string;
   localPath: string;
-  /** True when the acquisition download has finished. */
+  /** True when the acquisition download has finished (or failed with a partial file). */
   downloadComplete: boolean;
   bytesDownloaded: number;
 }
@@ -43,13 +53,16 @@ export interface PackagerJobSource {
 }
 
 /**
- * Packages growing IPTV cache files into an HLS event playlist on disk.
- * One ffmpeg pass per growth burst; resumes from the last segment end time.
+ * Packages IPTV cache files into a contiguous HLS playlist on disk.
+ *
+ * Always rebuilds from the start of the file (stream copy). The previous
+ * append_list + -ss approach inserted hundreds of discontinuities and a high
+ * MEDIA-SEQUENCE, so AVPlayer treated the playlist as a live edge near ~25% of
+ * a full movie and then stalled with "Playback stopped unexpectedly".
  */
 export class HlsPackager {
   private readonly busy = new Set<string>();
   private readonly lastPackSize = new Map<string, number>();
-  private readonly lastEndSeconds = new Map<string, number>();
   private readonly copyAudio = new Map<string, boolean>();
   private timer?: ReturnType<typeof setInterval>;
   private stopped = false;
@@ -96,11 +109,12 @@ export class HlsPackager {
       if (size < MIN_BYTES_BEFORE_PACK && !job.downloadComplete) continue;
 
       const lastSize = this.lastPackSize.get(job.id) ?? 0;
-      const grew = size > lastSize + 64_000;
+      const grew = size > lastSize + MIN_REPACK_GROWTH_BYTES;
       const ready = hlsPlaybackReady(this.dataDir, job.id);
+      const broken = ready && playlistNeedsRebuild(hlsPlaylistPath(this.dataDir, job.id));
 
-      // Re-pack when the file grew, or drain/finalize when the download completed.
-      if (!grew && !job.downloadComplete && ready) continue;
+      // Re-pack when the file grew enough, playlist is broken, or download finished.
+      if (!grew && !job.downloadComplete && ready && !broken) continue;
       if (!grew && !job.downloadComplete && !ready) {
         // First pack: brief stall so container headers settle on disk.
         await sleep(PACK_STALL_MS);
@@ -108,7 +122,7 @@ export class HlsPackager {
 
       this.busy.add(job.id);
       try {
-        await this.packOnce(job);
+        await this.packFromStart(job);
         this.lastPackSize.set(job.id, size);
         if (hlsPlaybackReady(this.dataDir, job.id)) {
           this.source.markHlsReady?.(job.id);
@@ -121,87 +135,24 @@ export class HlsPackager {
     }
   }
 
-  private async packOnce(job: PackagerJob): Promise<void> {
+  private async packFromStart(job: PackagerJob): Promise<void> {
     const outDir = hlsDir(this.dataDir, job.id);
     mkdirSync(outDir, { recursive: true });
+    clearHlsOutput(outDir);
 
     const copyAudio = await this.resolveCopyAudio(job.id, job.localPath);
-    const startSeconds = this.lastEndSeconds.get(job.id) ?? 0;
     const playlist = hlsPlaylistPath(this.dataDir, job.id);
-    const isFirst = !existsSync(playlist) || startSeconds <= 0;
 
-    // Package a short window so we stop before the growing EOF.
     const args = [
       "-hide_banner",
       "-loglevel",
       "error",
+      "-err_detect",
+      "ignore_err",
       "-probesize",
       "1M",
       "-analyzeduration",
       "2M",
-    ];
-    if (startSeconds > 0) {
-      args.push("-ss", String(startSeconds));
-    }
-    args.push("-i", job.localPath);
-    if (!job.downloadComplete) {
-      args.push("-t", "30");
-    }
-    const beforeSegs = countSegments(playlist);
-    args.push(
-      "-map",
-      "0:v:0",
-      "-map",
-      "0:a:0?",
-      "-c:v",
-      "copy",
-      ...(copyAudio
-        ? (["-c:a", "copy"] as const)
-        : (["-c:a", "aac", "-ac", "2", "-b:a", "192k"] as const)),
-      "-f",
-      "hls",
-      "-hls_time",
-      "4",
-      "-hls_list_size",
-      "0",
-      "-start_number",
-      String(beforeSegs),
-      "-hls_flags",
-      isFirst
-        ? "independent_segments+omit_endlist"
-        : "independent_segments+append_list+omit_endlist",
-      "-hls_segment_filename",
-      join(outDir, "seg_%05d.ts"),
-      playlist,
-    );
-
-    const code = await runFfmpeg(args);
-    if (code !== 0 && !hlsPlaybackReady(this.dataDir, job.id)) {
-      throw new Error(`ffmpeg hls exit ${code}`);
-    }
-
-    const afterSegs = countSegments(playlist);
-    if (afterSegs > beforeSegs) {
-      // Advance resume point by roughly packed duration (4s target × new segs).
-      this.lastEndSeconds.set(job.id, startSeconds + (afterSegs - beforeSegs) * 4);
-    }
-
-    if (job.downloadComplete && !hlsFinalized(this.dataDir, job.id)) {
-      await this.finalizeRemainder(job, copyAudio);
-    }
-  }
-
-  private async finalizeRemainder(job: PackagerJob, copyAudio: boolean): Promise<void> {
-    const outDir = hlsDir(this.dataDir, job.id);
-    const playlist = hlsPlaylistPath(this.dataDir, job.id);
-    const startSeconds = this.lastEndSeconds.get(job.id) ?? 0;
-    const startNumber = countSegments(playlist);
-    const args = [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-ss",
-      String(startSeconds),
       "-i",
       job.localPath,
       "-map",
@@ -219,16 +170,27 @@ export class HlsPackager {
       "4",
       "-hls_list_size",
       "0",
+      "-hls_playlist_type",
+      job.downloadComplete ? "vod" : "event",
       "-start_number",
-      String(startNumber),
+      "0",
       "-hls_flags",
-      "independent_segments+append_list",
+      job.downloadComplete
+        ? "independent_segments"
+        : "independent_segments+omit_endlist",
       "-hls_segment_filename",
       join(outDir, "seg_%05d.ts"),
       playlist,
     ];
-    await runFfmpeg(args);
-    finalizePlaylist(playlist);
+
+    const code = await runFfmpeg(args);
+    if (code !== 0 && !hlsPlaybackReady(this.dataDir, job.id)) {
+      throw new Error(`ffmpeg hls exit ${code}`);
+    }
+
+    if (job.downloadComplete) {
+      ensureEndList(playlist);
+    }
   }
 
   private async resolveCopyAudio(id: string, filePath: string): Promise<boolean> {
@@ -241,16 +203,39 @@ export class HlsPackager {
   }
 }
 
-function countSegments(playlist: string): number {
-  if (!existsSync(playlist)) return 0;
+/** True when an on-disk playlist would confuse AVPlayer (live-edge / gaps). */
+export function playlistNeedsRebuild(playlistPath: string): boolean {
+  if (!existsSync(playlistPath)) return false;
   try {
-    return (readFileSync(playlist, "utf8").match(/#EXTINF:/g) ?? []).length;
+    const text = readFileSync(playlistPath, "utf8");
+    if (text.includes("#EXT-X-DISCONTINUITY")) return true;
+    const seq = text.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
+    if (seq && Number(seq[1]) > 0) return true;
+    return false;
   } catch {
-    return 0;
+    return false;
   }
 }
 
-function finalizePlaylist(playlist: string): void {
+function clearHlsOutput(outDir: string): void {
+  if (!existsSync(outDir)) return;
+  for (const name of readdirSync(outDir)) {
+    if (
+      name === "index.m3u8" ||
+      name.endsWith(".ts") ||
+      name.endsWith(".m4s") ||
+      name.endsWith(".mp4")
+    ) {
+      try {
+        rmSync(join(outDir, name), { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+function ensureEndList(playlist: string): void {
   if (!existsSync(playlist)) return;
   try {
     let text = readFileSync(playlist, "utf8");
