@@ -93,6 +93,10 @@ export function LoginScreen({
     },
   });
 
+  const signIn = () => {
+    if (!mutation.isPending) mutation.mutate();
+  };
+
   if (appearance === "web") {
     const webBody = (
       <View style={styles.webPage}>
@@ -119,6 +123,8 @@ export function LoginScreen({
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus
+            returnKeyType="go"
+            onSubmitEditing={signIn}
           />
           <TextInput
             style={[fieldStyles.input, styles.webInput]}
@@ -127,12 +133,14 @@ export function LoginScreen({
             placeholder="Password"
             placeholderTextColor="#8c8c8c"
             secureTextEntry
+            returnKeyType="go"
+            onSubmitEditing={signIn}
           />
           <Button
             label={mutation.isPending ? "Signing in…" : "Sign In"}
             variant="accent"
             style={styles.action}
-            onPress={() => mutation.mutate()}
+            onPress={signIn}
             disabled={mutation.isPending}
           />
         </View>
