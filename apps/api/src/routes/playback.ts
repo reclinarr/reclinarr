@@ -16,7 +16,6 @@ import { hlsDir, hlsPlaybackReady } from "../services/hls-paths.js";
 import { liveHlsReady } from "../services/live-hls.js";
 import { releaseLivePlayback } from "../services/live-playback.js";
 import {
-  hlsAccelPath,
   mediaPlaneIsNginx,
   sendAccelRedirect,
   upstreamAccelPath,
@@ -316,8 +315,9 @@ export async function registerPlaybackRoutes(
 
   /**
    * Serve HLS playlist/segments for a local acquisition cache.
-   * nginx media plane: X-Accel-Redirect to /_hls/{id}/...
-   * node media plane: stream files from disk.
+   * Always stream from Node (same as live HLS segments). Local files under
+   * RECLINARR_DATA_DIR are often mode 600 from ffmpeg; nginx's `/_hls` alias
+   * then 403s and AVPlayer reports "permission to access the requested resource".
    */
   const sendCacheHls = async (
     req: { session?: { id: string } },
@@ -352,12 +352,6 @@ export async function registerPlaybackRoutes(
       reply.header("Content-Type", contentTypeForHls(clean));
       reply.header("Cache-Control", "no-cache");
       return reply.send(body);
-    }
-
-    if (nginxPlane) {
-      return sendAccelRedirect(reply, hlsAccelPath(id, clean), {
-        contentType: contentTypeForHls(clean),
-      });
     }
 
     const st = statSync(filePath);

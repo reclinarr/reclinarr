@@ -28,7 +28,11 @@ envsubst '${RECLINARR_PORT} ${RECLINARR_API_PORT} ${RECLINARR_DATA_DIR} ${JELLYF
   < /etc/nginx/nginx.conf.template \
   > /etc/nginx/nginx.conf
 
+# World-readable HLS so nginx `/_hls` X-Accel can serve segments if used.
+# ffmpeg often creates 600 files as root; the nginx worker then 403s.
+umask 022
 mkdir -p "$RECLINARR_DATA_DIR/hls" /var/log/nginx /tmp
+chmod -R a+rX "$RECLINARR_DATA_DIR/hls" 2>/dev/null || true
 
 # API on loopback; nginx publishes RECLINARR_PORT.
 RECLINARR_PORT="$RECLINARR_API_PORT" \
