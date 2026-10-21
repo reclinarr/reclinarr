@@ -228,6 +228,15 @@ export function WebChrome({
                 >
                   <Text style={styles.menuText}>Requests</Text>
                 </Pressable>
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    navigation.navigate("Profile");
+                  }}
+                >
+                  <Text style={styles.menuText}>Profile</Text>
+                </Pressable>
                 <Pressable style={styles.menuItem} onPress={() => void signOut()}>
                   <Text style={styles.menuText}>Sign out</Text>
                 </Pressable>

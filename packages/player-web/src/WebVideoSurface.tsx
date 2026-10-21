@@ -138,7 +138,10 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
 
     const bufferedFraction = (): number | undefined => {
       try {
-        if (!(video.duration > 0) || video.buffered.length === 0) return undefined;
+        // Live HLS reports duration=Infinity — end/Infinity is 0 and stuck the overlay at 0%.
+        if (!Number.isFinite(video.duration) || !(video.duration > 0) || video.buffered.length === 0) {
+          return undefined;
+        }
         const end = video.buffered.end(video.buffered.length - 1);
         return Math.min(1, Math.max(0, end / video.duration));
       } catch {
@@ -176,10 +179,19 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
     const onWaiting = () => markWaiting();
     const onStalled = () => markWaiting();
     const onPlaying = () => markReady();
+    const onCanPlay = () => {
+      if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) markReady();
+    };
     const onCanPlayThrough = () => markReady();
     const onSeeking = () => markWaiting();
     const onSeeked = () => {
       if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA && !video.paused) {
+        markReady();
+      }
+    };
+    const onTimeUpdate = () => {
+      // Live IPTV often resumes after `waiting` without firing `playing` again.
+      if (shown && !video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
         markReady();
       }
     };
@@ -195,18 +207,22 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("stalled", onStalled);
     video.addEventListener("playing", onPlaying);
+    video.addEventListener("canplay", onCanPlay);
     video.addEventListener("canplaythrough", onCanPlayThrough);
     video.addEventListener("seeking", onSeeking);
     video.addEventListener("seeked", onSeeked);
+    video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("progress", onProgress);
     return () => {
       if (showTimer) clearTimeout(showTimer);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("stalled", onStalled);
       video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("canplaythrough", onCanPlayThrough);
       video.removeEventListener("seeking", onSeeking);
       video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("progress", onProgress);
     };
   }, [props.uri]);
@@ -226,6 +242,7 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
     handleRef.current = attachWebPlayback(video, {
       source,
       paused: props.paused,
+      isLive: props.isLive,
       startPosition: props.startPositionSeconds,
       onProgress: (info) => progressCb.current(info),
       onLoad: (info) => loadCb.current?.(info),

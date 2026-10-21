@@ -1,7 +1,8 @@
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 import { me } from "@reclinarr/client";
-import { AnalyticsConsentSettings, colors } from "@reclinarr/native-ui";
+import { AnalyticsConsentSettings, PlaybackLanguageSettings, colors } from "@reclinarr/native-ui";
 import { Chrome } from "../components/Chrome";
 import { PageHeading } from "../components/PageHeading";
 import { useTvLayout } from "../layout";
@@ -13,21 +14,26 @@ export function SettingsScreen({ username }: { username: string }) {
   return (
     <Chrome username={username}>
       <PageHeading title="Settings" />
-      <View style={[styles.content, { paddingHorizontal: layout.pageX }]}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingHorizontal: layout.pageX }]}
+      >
         <View style={styles.card}>
+          <PlaybackLanguageSettings storage={AsyncStorage} />
           {session.data?.user.id ? (
             <AnalyticsConsentSettings userId={session.data.user.id} />
           ) : null}
         </View>
-      </View>
+      </ScrollView>
     </Chrome>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { paddingTop: 12 },
+  scroll: { flex: 1 },
+  content: { paddingTop: 12, paddingBottom: 48 },
   card: {
-    maxWidth: 640,
+    maxWidth: 920,
     padding: 24,
     borderRadius: 12,
     backgroundColor: colors.bg1,

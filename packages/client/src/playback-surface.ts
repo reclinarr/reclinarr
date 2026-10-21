@@ -22,6 +22,8 @@ export type PlaybackSurfaceAttachOpts = PlaybackSurfaceEvents & {
   source: PlaybackSource;
   startPosition?: number;
   paused?: boolean;
+  /** Live IPTV / linear — tune buffering and HLS live sync (web). */
+  isLive?: boolean;
   audioTrackIndex?: number | null;
   subtitleTrack?: SubtitleTrack | null | "off";
   headers?: Record<string, string>;

@@ -25,6 +25,12 @@ export function attachWebPlayback(
 
   const kind = classifyPlayback(source);
   const url = source.delivery.url;
+  // Live remux playlists are short sliding windows — VOD-sized buffers fall behind
+  // delete_segments and Chromium ends with DEMUXER_ERROR_COULD_NOT_PARSE.
+  const isLive =
+    Boolean(opts.isLive) ||
+    /\/playback\/[^/]+\/live\//.test(url) ||
+    /\/live\/[^/]+\/hls\//.test(url);
   const resumeAt =
     startPosition && startPosition > 30 && Number.isFinite(startPosition) ? startPosition : -1;
 
@@ -51,7 +57,20 @@ export function attachWebPlayback(
     if (!opts.paused) void video.play().catch(() => undefined);
   };
   const onEnded = () => onEnd();
-  const onVidError = () => onError(video.error?.message ?? "Playback failed");
+  const onVidError = () => {
+    // Stop loaders so a demuxer failure does not hammer the playlist endpoint.
+    try {
+      hls?.stopLoad();
+    } catch {
+      /* ignore */
+    }
+    try {
+      mpeg?.unload?.();
+    } catch {
+      /* ignore */
+    }
+    onError(video.error?.message ?? "Playback failed");
+  };
 
   video.addEventListener("timeupdate", onTimeUpdate);
   video.addEventListener("loadedmetadata", onLoaded);
@@ -92,15 +111,32 @@ export function attachWebPlayback(
   } else if (nativeHls) {
     video.src = url;
   } else if (kind === "hls" && Hls.isSupported()) {
-    resumeOwnedByHls = resumeAt > 30;
+    resumeOwnedByHls = !isLive && resumeAt > 30;
     hls = new Hls({
       enableWorker: true,
-      startPosition: resumeAt,
-      // Keep a healthier forward buffer so we wait for media instead of stuttering.
-      maxBufferLength: 40,
-      maxMaxBufferLength: 80,
-      maxBufferSize: 80 * 1000 * 1000,
-      backBufferLength: 30,
+      startPosition: isLive ? -1 : resumeAt,
+      ...(isLive
+        ? {
+            // Match server sliding window (~12×2s). Buffering 40s of VOD-style
+            // forward media makes us chase deleted segments → demuxer parse errors.
+            lowLatencyMode: false,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 8,
+            liveDurationInfinity: true,
+            maxLiveSyncPlaybackRate: 1.2,
+            maxBufferLength: 12,
+            maxMaxBufferLength: 24,
+            maxBufferSize: 30 * 1000 * 1000,
+            backBufferLength: 8,
+            highBufferWatchdogPeriod: 1,
+          }
+        : {
+            // Keep a healthier forward buffer so we wait for media instead of stuttering.
+            maxBufferLength: 40,
+            maxMaxBufferLength: 80,
+            maxBufferSize: 80 * 1000 * 1000,
+            backBufferLength: 30,
+          }),
       maxBufferHole: 0.5,
       nudgeOffset: 0.1,
       nudgeMaxRetry: 5,
@@ -114,23 +150,32 @@ export function attachWebPlayback(
     hls.loadSource(url);
     hls.attachMedia(video);
     // AirPlay needs a real HLS URL; Safari switches to this <source> when casting.
+    // Only attach on WebKit — Chromium ignoring MSE + `<source type=mpegURL>` can
+    // spam playlist GETs and race the MSE pipeline into demuxer errors.
     // https://webkit.org/blog/15036/how-to-use-media-source-extensions-with-airplay/
-    const airplaySource = document.createElement("source");
-    airplaySource.type = "application/x-mpegURL";
-    airplaySource.src = url;
-    video.appendChild(airplaySource);
+    const webkitVideo = video as HTMLVideoElement & {
+      webkitCurrentPlaybackTargetIsWireless?: boolean;
+      webkitShowPlaybackTargetPicker?: () => void;
+    };
+    const airplayCapable = typeof webkitVideo.webkitShowPlaybackTargetPicker === "function";
+    let airplaySource: HTMLSourceElement | null = null;
     const onWireless = () => {
-      const wireless = Boolean(
-        (video as HTMLVideoElement & { webkitCurrentPlaybackTargetIsWireless?: boolean })
-          .webkitCurrentPlaybackTargetIsWireless,
-      );
+      const wireless = Boolean(webkitVideo.webkitCurrentPlaybackTargetIsWireless);
       if (wireless) hls?.stopLoad();
       else hls?.startLoad();
     };
-    video.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", onWireless);
+    if (airplayCapable) {
+      airplaySource = document.createElement("source");
+      airplaySource.type = "application/x-mpegURL";
+      airplaySource.src = url;
+      video.appendChild(airplaySource);
+      video.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", onWireless);
+    }
     extraCleanup = () => {
-      video.removeEventListener("webkitcurrentplaybacktargetiswirelesschanged", onWireless);
-      airplaySource.remove();
+      if (airplayCapable) {
+        video.removeEventListener("webkitcurrentplaybacktargetiswirelesschanged", onWireless);
+      }
+      airplaySource?.remove();
     };
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
@@ -151,6 +196,8 @@ export function attachWebPlayback(
       }
       if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
         hls?.recoverMediaError();
+        // Live windows move on; re-kick loading after recover so we rejoin the edge.
+        if (isLive) hls?.startLoad();
         return;
       }
       onError(data.details || "HLS error");

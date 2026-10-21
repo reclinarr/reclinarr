@@ -9,13 +9,14 @@ import {
   SearchScreen as SharedSearch,
   PlayerScreen as SharedPlayer,
   AnalyticsConsentSettings,
+  PlaybackLanguageSettings,
 } from "@reclinarr/native-ui";
 import { WebVideoSurface } from "@reclinarr/player-web";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { logout, me, playLiveChannel } from "@reclinarr/client";
 import { colors } from "@reclinarr/native-ui";
 import { WebChrome } from "./components/WebChrome";
@@ -370,9 +371,10 @@ export function ProfileScreen({ username }: { username: string }) {
   const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
   return (
     <WebChrome username={username}>
-      <View style={[styles.profile, { paddingTop: 68 + 36 }]}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.profile, { paddingTop: 68 + 36 }]}>
         <Text style={styles.h1}>Profile</Text>
         <Text style={styles.copy}>Signed in as {username}</Text>
+        <PlaybackLanguageSettings storage={storage} />
         {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
         <Pressable
           style={styles.btn}
@@ -399,14 +401,14 @@ export function ProfileScreen({ username }: { username: string }) {
         >
           <Text style={styles.btnText}>Sign out</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </WebChrome>
   );
 }
 
 const styles = StyleSheet.create({
   pageTitle: { color: "#fff", fontSize: 32, fontWeight: "700", letterSpacing: -0.4 },
-  profile: { padding: 32, gap: 12, maxWidth: 480 },
+  profile: { padding: 32, gap: 12, maxWidth: 760 },
   h1: { color: colors.text, fontSize: 28, fontWeight: "800", marginBottom: 8 },
   copy: { color: colors.muted, marginBottom: 16 },
   playerFallback: {

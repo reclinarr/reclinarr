@@ -41,6 +41,7 @@ export async function registerPlaybackRoutes(
         identity: MediaIdentitySchema,
         startPositionSeconds: z.number().nonnegative().optional(),
         audioStreamIndex: z.number().int().optional(),
+        preferredAudioLanguage: z.string().max(16).optional(),
         /** Client-measured throughput cap (bits/s) from /api/playback/bandwidth-probe. */
         maxStreamingBitrate: z.number().int().positive().max(50_000_000).optional(),
         deviceProfile: z.enum(["web", "ios", "android"]).optional(),
@@ -53,6 +54,7 @@ export async function registerPlaybackRoutes(
     const result = await ctx.playbackResolver.resolve(userContext, body.identity, {
       startPositionSeconds: body.startPositionSeconds,
       audioStreamIndex: body.audioStreamIndex,
+      preferredAudioLanguage: body.preferredAudioLanguage,
       maxStreamingBitrate: body.maxStreamingBitrate,
       deviceProfile: body.deviceProfile,
     });
@@ -468,11 +470,15 @@ export async function registerPlaybackRoutes(
     }
 
     const provider = ctx.dispatcharr;
-    try {
-      await ctx.liveHls.ensureReady(uuid, (opts) => provider.openLiveStream(opts));
-    } catch (err) {
-      const e = err as Error & { statusCode?: number };
-      return reply.status(e.statusCode ?? 502).send({ error: e.message });
+    // Playlist polls are frequent — only call ensureReady when the window is missing.
+    // Re-entering ensureReady on every hls.js reload was stacking hundreds of awaits.
+    if (!liveHlsReady(ctx.config.RECLINARR_DATA_DIR, uuid)) {
+      try {
+        await ctx.liveHls.ensureReady(uuid, (opts) => provider.openLiveStream(opts));
+      } catch (err) {
+        const e = err as Error & { statusCode?: number };
+        return reply.status(e.statusCode ?? 502).send({ error: e.message });
+      }
     }
 
     const filePath = ctx.liveHls.filePath(uuid, "index.m3u8");

@@ -5,7 +5,9 @@ import {
   parseCatalogueLanguageHints,
   parsePreferredLanguages,
   parseQualityHints,
+  pickAudioTrackIndex,
   pickPreferredByCatalogueLanguage,
+  withUserPreferredLanguage,
   rankDispatcharrStreamCandidates,
   scoreLanguagePreference,
   scoreQualityPreference,
@@ -252,5 +254,25 @@ describe("parsePreferredLanguages", () => {
     expect(parsePreferredLanguages("it, en")).toEqual(["it", "en"]);
     expect(parsePreferredLanguages("")).toEqual(["en"]);
     expect(parsePreferredLanguages(null)).toEqual(["en"]);
+  });
+});
+
+describe("withUserPreferredLanguage", () => {
+  it("puts the user language first and keeps the server fallbacks", () => {
+    expect(withUserPreferredLanguage(["en"], "it")).toEqual(["it", "en"]);
+    expect(withUserPreferredLanguage(["en", "it"], "eng")).toEqual(["en", "it"]);
+    expect(withUserPreferredLanguage(["en"], null)).toEqual(["en"]);
+  });
+});
+
+describe("pickAudioTrackIndex", () => {
+  it("matches ISO codes and leaves unknown languages unset", () => {
+    const tracks = [
+      { index: 1, language: "eng" },
+      { index: 2, language: "ita" },
+    ];
+    expect(pickAudioTrackIndex(tracks, "it")).toBe(2);
+    expect(pickAudioTrackIndex(tracks, "de")).toBeUndefined();
+    expect(pickAudioTrackIndex(tracks, null)).toBeUndefined();
   });
 });

@@ -11,6 +11,7 @@ import type {
   PlaybackSource,
   SubtitleTrack,
 } from "@reclinarr/shared";
+import { loadAudioLanguagePref } from "./audio-pref.js";
 import { BW_PROBE_CACHE_KEY, type KeyValueStorage } from "./storage.js";
 import { sessionCookieHeader, withCatalogueDuration } from "./playback.js";
 import { SESSION_COOKIE } from "./session.js";
@@ -678,6 +679,7 @@ export class ReclinarrClient {
     opts?: {
       startPositionSeconds?: number;
       audioStreamIndex?: number;
+      preferredAudioLanguage?: string;
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
     },
@@ -688,6 +690,7 @@ export class ReclinarrClient {
         identity,
         startPositionSeconds: opts?.startPositionSeconds,
         audioStreamIndex: opts?.audioStreamIndex,
+        preferredAudioLanguage: opts?.preferredAudioLanguage,
         maxStreamingBitrate: opts?.maxStreamingBitrate,
         deviceProfile: opts?.deviceProfile,
       }),
@@ -763,10 +766,12 @@ export class ReclinarrClient {
   ): Promise<PlaybackSource> {
     const started = Date.now();
     const maxStreamingBitrate = await this.measurePlaybackBitrate(identity.jellyfinItemId);
+    const preferredAudioLanguage = await loadAudioLanguagePref(this.storage);
     const resolveOpts = {
       maxStreamingBitrate,
       startPositionSeconds: opts?.startPositionSeconds,
       deviceProfile: opts?.deviceProfile ?? inferDeviceProfile(),
+      ...(preferredAudioLanguage ? { preferredAudioLanguage } : {}),
     };
 
     const first = await this.resolvePlayback(identity, resolveOpts);

@@ -906,7 +906,10 @@ export function PlayerScreen({
           subtitleIndex={subIndex}
           subtitleTracks={subtitleTracks}
           onProgress={({ currentTime, duration: d, playableDuration }) => {
-            if (currentTime > 0.25 && !playbackEverProgressed.current) {
+            // Live HLS often starts near the edge with currentTime already ≫ 0.25.
+            const progressed =
+              currentTime > 0.25 || (isLive && currentTime > 0 && !Number.isNaN(currentTime));
+            if (progressed && !playbackEverProgressed.current) {
               playbackEverProgressed.current = true;
               const now = typeof performance !== "undefined" ? performance.now() : Date.now();
               trackTelemetry("client.playback_milestone", {
@@ -928,6 +931,7 @@ export function PlayerScreen({
                 ? d
                 : knownDurationRef.current;
             if (
+              !isLive &&
               typeof playableDuration === "number" &&
               Number.isFinite(playableDuration) &&
               dur > 0
@@ -958,6 +962,7 @@ export function PlayerScreen({
               setIsBuffering(waiting);
             }
             if (
+              !isLive &&
               typeof bufferedFraction === "number" &&
               Number.isFinite(bufferedFraction) &&
               bufferedFraction >= 0

@@ -151,7 +151,11 @@ export class MockJellyfinProvider implements LibraryProvider, PlaybackProvider {
   async resolvePlayback(
     _ctx: UserContext,
     identity: MediaIdentity,
-    opts?: { startPositionSeconds?: number; audioStreamIndex?: number },
+    opts?: {
+      startPositionSeconds?: number;
+      audioStreamIndex?: number;
+      preferredAudioLanguage?: string;
+    },
   ): Promise<PlaybackSource | null> {
     if (!identity.jellyfinItemId) return null;
     const media = library.find((m) => m.identity.jellyfinItemId === identity.jellyfinItemId);

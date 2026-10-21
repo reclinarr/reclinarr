@@ -126,6 +126,8 @@ export function normalizeLanguageTag(raw?: string | null): string | undefined {
     heb: "he",
     he: "he",
     il: "he",
+    ukr: "uk",
+    uk: "uk",
   };
   const primary = t.split("-")[0]!;
   return map[primary] ?? (primary.length <= 3 ? primary : undefined);
@@ -396,6 +398,33 @@ export function isObviousLanguageMismatch(
   const cat = normalizeLanguageTag(catalogueLanguage);
   if (cat && !preferred.has(cat) && !audio.length) return true;
   return false;
+}
+
+/**
+ * Put a per-user language ahead of the server list.
+ * Unknown or empty user language leaves the server order unchanged.
+ */
+export function withUserPreferredLanguage(
+  serverLanguages: string[],
+  userLanguage?: string | null,
+): string[] {
+  const server = serverLanguages
+    .map((language) => normalizeLanguageTag(language))
+    .filter((language): language is string => Boolean(language));
+  const base = server.length ? server : ["en"];
+  const user = normalizeLanguageTag(userLanguage);
+  if (!user) return base;
+  return [user, ...base.filter((language) => language !== user)];
+}
+
+/** First audio track whose language matches the preference. */
+export function pickAudioTrackIndex(
+  tracks: Array<{ index: number; language?: string | null }>,
+  preferredLanguage?: string | null,
+): number | undefined {
+  const want = normalizeLanguageTag(preferredLanguage);
+  if (!want) return undefined;
+  return tracks.find((track) => normalizeLanguageTag(track.language) === want)?.index;
 }
 
 /** Parse comma-separated preferred language env (e.g. "it,en"). */

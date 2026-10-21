@@ -1,5 +1,5 @@
 import type { Media, MediaIdentity, MediaType, PlaybackSource, ProviderHealth } from "@reclinarr/shared";
-import { ProviderError } from "@reclinarr/shared";
+import { pickAudioTrackIndex, ProviderError } from "@reclinarr/shared";
 import { HttpClient, mediaBrowserAuth } from "../http.js";
 import type { LibraryProvider, PlaybackProvider, UserContext } from "../types.js";
 import { JELLYFIN_CAPABILITIES } from "../types.js";
@@ -341,6 +341,8 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
     opts?: {
       startPositionSeconds?: number;
       audioStreamIndex?: number;
+      /** Select this language when the file has a matching audio stream. */
+      preferredAudioLanguage?: string;
       /** Client-measured cap (bits/s); combined with a server probe of the Jellyfin hop. */
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
@@ -373,36 +375,54 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
         : probed,
     );
 
-    const { data } = await this.httpFor(userContext).request(
-      "POST",
-      `/Items/${encodeURIComponent(itemId)}/PlaybackInfo`,
-      {
-        query: { userId: userContext.jellyfinUserId },
-        body: {
-          UserId: userContext.jellyfinUserId,
-          DeviceProfile: native
-            ? nativeDeviceProfile(deviceProfile, maxStreamingBitrate)
-            : browserDeviceProfile(maxStreamingBitrate),
-          EnableDirectPlay: true,
-          EnableDirectStream: true,
-          EnableTranscoding: true,
-          MaxStreamingBitrate: maxStreamingBitrate,
-          ...(opts?.audioStreamIndex != null
-            ? { AudioStreamIndex: opts.audioStreamIndex }
-            : {}),
+    const requestInfo = (audioStreamIndex?: number) =>
+      this.httpFor(userContext).request(
+        "POST",
+        `/Items/${encodeURIComponent(itemId)}/PlaybackInfo`,
+        {
+          query: { userId: userContext.jellyfinUserId },
+          body: {
+            UserId: userContext.jellyfinUserId,
+            DeviceProfile: native
+              ? nativeDeviceProfile(deviceProfile, maxStreamingBitrate)
+              : browserDeviceProfile(maxStreamingBitrate),
+            EnableDirectPlay: true,
+            EnableDirectStream: true,
+            EnableTranscoding: true,
+            MaxStreamingBitrate: maxStreamingBitrate,
+            ...(audioStreamIndex != null ? { AudioStreamIndex: audioStreamIndex } : {}),
+          },
+          schema: JellyfinPlaybackInfoSchema,
         },
-        schema: JellyfinPlaybackInfoSchema,
-      },
-    );
+      );
 
-    const source = data.MediaSources?.[0];
+    let audioStreamIndex = opts?.audioStreamIndex;
+    let { data } = await requestInfo(audioStreamIndex);
+    let source = data.MediaSources?.[0];
     if (!source) return null;
+
+    if (audioStreamIndex == null && opts?.preferredAudioLanguage) {
+      const tracks = [];
+      for (const stream of source.MediaStreams ?? []) {
+        if (stream.Type === "Audio" && stream.Index != null) {
+          tracks.push({ index: stream.Index, language: stream.Language });
+        }
+      }
+      const picked = pickAudioTrackIndex(tracks, opts.preferredAudioLanguage);
+      const defaultAudio = source.DefaultAudioStreamIndex ?? undefined;
+      if (picked != null && picked !== defaultAudio) {
+        audioStreamIndex = picked;
+        const again = await requestInfo(audioStreamIndex);
+        data = again.data;
+        source = data.MediaSources?.[0] ?? source;
+      }
+    }
 
     const playSessionId = data.PlaySessionId;
     let playMethod = native
       ? resolvePlayMethodForNative(source)
       : resolvePlayMethodForBrowser(source);
-    const requestedAudio = opts?.audioStreamIndex;
+    const requestedAudio = audioStreamIndex;
     const defaultAudio = source.DefaultAudioStreamIndex ?? undefined;
     // DirectPlay streams the full file; browsers pick their own default audio and
     // ignore AudioStreamIndex on static URLs. Force remux/transcode when the user

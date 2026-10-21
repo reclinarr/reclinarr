@@ -50,6 +50,8 @@ export interface PlaybackProvider extends MediaProvider {
       /** Resume / scrub offset — passed to Jellyfin as StartTimeTicks for HLS transcode. */
       startPositionSeconds?: number;
       audioStreamIndex?: number;
+      /** ISO language to select when the file has a matching audio stream. */
+      preferredAudioLanguage?: string;
       /** Optional client-measured throughput cap (bits/s). */
       maxStreamingBitrate?: number;
       /**
@@ -114,7 +116,7 @@ export interface VodProvider extends MediaProvider {
   findVodByTmdb(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    opts?: { titleHint?: string; yearHint?: number },
+    opts?: { titleHint?: string; yearHint?: number; preferredLanguages?: string[] },
   ): Promise<Media | null>;
   listEpisodesForSeries?(
     seriesId: number,

@@ -51,7 +51,12 @@ export class MockDispatcharrProvider implements VodProvider, LiveTvProvider {
   async findVodByTmdb(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    _opts?: { titleHint?: string; yearHint?: number; dispatcharrId?: number },
+    _opts?: {
+      titleHint?: string;
+      yearHint?: number;
+      dispatcharrId?: number;
+      preferredLanguages?: string[];
+    },
   ): Promise<Media | null> {
     if (mediaType !== "movie") return null;
     if (tmdbId === dispatcharrOnlyMovie.identity.tmdbId) return dispatcharrOnlyMovie;
@@ -66,7 +71,7 @@ export class MockDispatcharrProvider implements VodProvider, LiveTvProvider {
     _seriesTmdbId: number,
     _seasonNumber: number,
     _episodeNumber: number,
-    _opts?: { titleHint?: string },
+    _opts?: { titleHint?: string; preferredLanguages?: string[] },
   ): Promise<Media | null> {
     return null;
   }

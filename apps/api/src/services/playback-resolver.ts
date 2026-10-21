@@ -6,7 +6,7 @@ import type {
   PlaybackSource,
   SubtitleTrack,
 } from "@reclinarr/shared";
-import { normalizeSubtitleLanguage } from "@reclinarr/shared";
+import { normalizeLanguageTag, normalizeSubtitleLanguage, withUserPreferredLanguage } from "@reclinarr/shared";
 import {
   BazarrProvider,
   DispatcharrProvider,
@@ -44,12 +44,13 @@ export class PlaybackResolver {
       /** Jellyfin HLS transcode seek/resume — StartTimeTicks. */
       startPositionSeconds?: number;
       audioStreamIndex?: number;
+      preferredAudioLanguage?: string;
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
     },
   ): Promise<PlaybackResolveResult | null> {
     const target = identity.mediaType === "tv"
-      ? await this.seriesPlaybackIdentity(userContext, identity)
+      ? await this.seriesPlaybackIdentity(userContext, identity, opts?.preferredAudioLanguage)
       : identity;
     if (!target) return null;
     const result = await this.pickSource(userContext, target, opts);
@@ -66,6 +67,7 @@ export class PlaybackResolver {
   private async seriesPlaybackIdentity(
     userContext: UserContext,
     identity: MediaIdentity,
+    preferredAudioLanguage?: string,
   ): Promise<MediaIdentity | null> {
     const series = identity.jellyfinItemId
       ? await this.jellyfin.getByJellyfinItemId(userContext, identity.jellyfinItemId)
@@ -76,7 +78,9 @@ export class PlaybackResolver {
     if (series?.identity.jellyfinItemId) {
       episodes = await this.jellyfin.listEpisodesForSeries(userContext, series.identity.jellyfinItemId);
     } else if (identity.tmdbId && this.dispatcharr.listEpisodesForSeries) {
-      const vod = await this.dispatcharr.findVodByTmdb(identity.tmdbId, "tv");
+      const vod = await this.dispatcharr.findVodByTmdb(identity.tmdbId, "tv", {
+        preferredLanguages: this.iptvPreferredLanguages(preferredAudioLanguage),
+      });
       const seriesId = vod?.availability.find((entry) => entry.provider === "dispatcharr")?.seriesId;
       if (seriesId != null) {
         episodes = await this.dispatcharr.listEpisodesForSeries(seriesId, { seriesTmdbId: identity.tmdbId });
@@ -136,6 +140,7 @@ export class PlaybackResolver {
     opts?: {
       startPositionSeconds?: number;
       audioStreamIndex?: number;
+      preferredAudioLanguage?: string;
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
     },
@@ -169,6 +174,7 @@ export class PlaybackResolver {
           const source = await this.jellyfin.resolvePlayback(userContext, resolvedIdentity, {
             startPositionSeconds: opts?.startPositionSeconds,
             audioStreamIndex: opts?.audioStreamIndex,
+            preferredAudioLanguage: opts?.preferredAudioLanguage,
             maxStreamingBitrate: opts?.maxStreamingBitrate,
             deviceProfile: opts?.deviceProfile,
           });
@@ -192,7 +198,7 @@ export class PlaybackResolver {
       return null;
     }
 
-    const iptv = await this.resolveIptvSource(identity);
+    const iptv = await this.resolveIptvSource(identity, opts?.preferredAudioLanguage);
     if (!iptv) return null;
 
     const job = await this.acquisitions.ensureCacheForPlay({
@@ -271,7 +277,18 @@ export class PlaybackResolver {
    * Resolve Dispatcharr uuid/stream for acquisition + optional catalogue duration.
    * Does not return a live IPTV remux PlaybackSource (connection budget).
    */
-  private async resolveIptvSource(identity: MediaIdentity): Promise<{
+  private iptvPreferredLanguages(userLanguage?: string): string[] {
+    const server =
+      this.dispatcharr instanceof DispatcharrProvider
+        ? this.dispatcharr.getPreferredLanguages()
+        : ["en"];
+    return withUserPreferredLanguage(server, normalizeLanguageTag(userLanguage));
+  }
+
+  private async resolveIptvSource(
+    identity: MediaIdentity,
+    preferredAudioLanguage?: string,
+  ): Promise<{
     acquisitionSource: AcquisitionSource;
     durationSeconds?: number;
   } | null> {
@@ -280,10 +297,7 @@ export class PlaybackResolver {
       identity.mediaType === "episode" &&
       this.dispatcharr.listEpisodesForSeries
     ) {
-      const preferredLanguages =
-        this.dispatcharr instanceof DispatcharrProvider
-          ? this.dispatcharr.getPreferredLanguages()
-          : undefined;
+      const preferredLanguages = this.iptvPreferredLanguages(preferredAudioLanguage);
       let seriesId =
         this.db != null
           ? lookupDispatcharrIndex(this.db, identity.tmdbId, "tv", preferredLanguages)
@@ -300,7 +314,7 @@ export class PlaybackResolver {
             identity.tmdbId,
             identity.seasonNumber ?? 0,
             identity.episodeNumber ?? 0,
-            { titleHint },
+            { titleHint, preferredLanguages },
           )
           .catch(() => null);
         return acquisitionFromMedia(episode, "episode");
@@ -331,10 +345,7 @@ export class PlaybackResolver {
         yearHint = details?.metadata.year;
         seerrDuration = metadataDurationSeconds(details);
       }
-      const preferredLanguages =
-        this.dispatcharr instanceof DispatcharrProvider
-          ? this.dispatcharr.getPreferredLanguages()
-          : undefined;
+      const preferredLanguages = this.iptvPreferredLanguages(preferredAudioLanguage);
       const indexed =
         this.db != null
           ? lookupDispatcharrIndex(
@@ -348,6 +359,7 @@ export class PlaybackResolver {
         .findVodByTmdb(identity.tmdbId, identity.mediaType, {
           titleHint,
           yearHint,
+          preferredLanguages,
           ...(indexed?.dispatcharrId != null ? { dispatcharrId: indexed.dispatcharrId } : {}),
         })
         .catch(() => null);

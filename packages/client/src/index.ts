@@ -79,11 +79,17 @@ export {
   resolveSubtitleIndex,
 } from "./subtitle-pref.js";
 export type { SubtitlePref } from "./subtitle-pref.js";
+export {
+  loadAudioLanguagePref,
+  loadAudioLanguagePrefSync,
+  saveAudioLanguagePref,
+} from "./audio-pref.js";
 export { getOrCreateDeviceId } from "./device.js";
 export {
   memoryStorage,
   DEVICE_ID_KEY,
   SUBTITLE_PREF_KEY,
+  AUDIO_LANG_PREF_KEY,
   BW_PROBE_CACHE_KEY,
 } from "./storage.js";
 export type { KeyValueStorage } from "./storage.js";

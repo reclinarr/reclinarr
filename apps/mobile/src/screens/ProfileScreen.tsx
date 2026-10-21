@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import { logout, me } from "@reclinarr/client";
@@ -7,7 +8,7 @@ import { ScreenHeader } from "../components/ScreenHeader";
 import { clearSession } from "../session";
 import { colors } from "../theme";
 import type { Nav } from "../nav";
-import { AnalyticsConsentSettings } from "@reclinarr/native-ui";
+import { AnalyticsConsentSettings, PlaybackLanguageSettings } from "@reclinarr/native-ui";
 
 export function ProfileScreen() {
   const navigation = useNavigation<Nav>();
@@ -33,9 +34,10 @@ export function ProfileScreen() {
   return (
     <View style={styles.page}>
       <ScreenHeader title="Profile" showBack />
-      <View style={styles.body}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.body}>
         <Text style={styles.name}>{username || "Signed in"}</Text>
-        <Text style={styles.copy}>Downloads, requests, and server settings.</Text>
+        <Text style={styles.copy}>Downloads, requests, and playback languages.</Text>
+        <PlaybackLanguageSettings storage={AsyncStorage} />
         {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
         <Button label="Downloads" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
         <View style={{ height: 10 }} />
@@ -53,14 +55,14 @@ export function ProfileScreen() {
           onPress={() => signOut.mutate()}
           disabled={signOut.isPending}
         />
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
-  body: { paddingHorizontal: 20, paddingTop: 12, gap: 4 },
+  body: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32, gap: 4 },
   name: { color: colors.text, fontSize: 22, fontWeight: "800", marginBottom: 6 },
   copy: { color: colors.muted, fontSize: 14, marginBottom: 20 },
 });

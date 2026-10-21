@@ -278,9 +278,17 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   async findVodByTmdb(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    opts?: { titleHint?: string; yearHint?: number; dispatcharrId?: number },
+    opts?: {
+      titleHint?: string;
+      yearHint?: number;
+      dispatcharrId?: number;
+      preferredLanguages?: string[];
+    },
   ): Promise<Media | null> {
-    const cacheKey = `${mediaType}:${tmdbId}`;
+    const languages = opts?.preferredLanguages?.length
+      ? opts.preferredLanguages
+      : this.preferredLanguages;
+    const cacheKey = `${mediaType}:${tmdbId}:${languages.join(",")}`;
     const cached = this.tmdbCache.get(cacheKey);
     if (cached && Date.now() - cached.at < DispatcharrProvider.TMDB_CACHE_TTL_MS) {
       return cached.media;
@@ -304,8 +312,8 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
         if (!hit) {
           hit =
             mediaType === "movie"
-              ? await this.findMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint)
-              : await this.findSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint);
+              ? await this.findMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages)
+              : await this.findSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages);
         }
         return hit;
       });
@@ -481,10 +489,13 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     seriesTmdbId: number,
     seasonNumber: number,
     episodeNumber: number,
-    opts?: { titleHint?: string },
+    opts?: { titleHint?: string; preferredLanguages?: string[] },
   ): Promise<Media | null> {
     const series = await this.findVodByTmdb(seriesTmdbId, "tv", {
       titleHint: opts?.titleHint,
+      ...(opts?.preferredLanguages?.length
+        ? { preferredLanguages: opts.preferredLanguages }
+        : {}),
     });
     const seriesId = series?.availability.find((a) => a.provider === "dispatcharr")?.seriesId;
     if (!seriesId) return null;
@@ -623,8 +634,9 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     tmdbId: number,
     titleHint?: string,
     yearHint?: number,
+    languages: string[] = this.preferredLanguages,
   ): Promise<Media | null> {
-    const best = await this.matchMovieByTmdb(tmdbId, titleHint, yearHint);
+    const best = await this.matchMovieByTmdb(tmdbId, titleHint, yearHint, languages);
     if (!best) return null;
     return this.enrichMovie(best.item, best.catalogueLanguage);
   }
@@ -633,6 +645,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     tmdbId: number,
     titleHint?: string,
     yearHint?: number,
+    languages: string[] = this.preferredLanguages,
   ): Promise<{ item: DispatcharrMovie; catalogueLanguage?: string } | null> {
     const http = await this.http();
     // Upstream has no tmdb_id filter — search (+ year when known) then match.
@@ -651,7 +664,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
         if (seen.size > 0) break;
       }
     }
-    return pickPreferredByCatalogueLanguage([...seen.values()], this.preferredLanguages, {
+    return pickPreferredByCatalogueLanguage([...seen.values()], languages, {
       nameOf: (m) => m.name,
       idOf: (m) => m.id,
     });
@@ -680,8 +693,9 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     tmdbId: number,
     titleHint?: string,
     yearHint?: number,
+    languages: string[] = this.preferredLanguages,
   ): Promise<Media | null> {
-    const best = await this.matchSeriesByTmdb(tmdbId, titleHint, yearHint);
+    const best = await this.matchSeriesByTmdb(tmdbId, titleHint, yearHint, languages);
     if (!best) return null;
     return mapSeriesToMedia(best.item, { catalogueLanguage: best.catalogueLanguage });
   }
@@ -690,6 +704,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     tmdbId: number,
     titleHint?: string,
     yearHint?: number,
+    languages: string[] = this.preferredLanguages,
   ): Promise<{ item: DispatcharrSeries; catalogueLanguage?: string } | null> {
     const http = await this.http();
     const queries = this.searchQueries(titleHint, tmdbId);
@@ -706,7 +721,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
         if (seen.size > 0) break;
       }
     }
-    return pickPreferredByCatalogueLanguage([...seen.values()], this.preferredLanguages, {
+    return pickPreferredByCatalogueLanguage([...seen.values()], languages, {
       nameOf: (s) => s.name,
       idOf: (s) => s.id,
     });

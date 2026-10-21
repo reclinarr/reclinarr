@@ -50,6 +50,7 @@ export {
 } from "./media-nav.js";
 export { Focusable } from "./Focusable.js";
 export { AnalyticsConsentGate, AnalyticsConsentSettings } from "./AnalyticsConsent.js";
+export { PlaybackLanguageSettings } from "./PlaybackLanguageSettings.js";
 export { usePlayMedia } from "./hooks/usePlayMedia.js";
 export * from "./screens/index.js";
 export type { VideoSurfaceProps, VideoTransport } from "./player/VideoSurfaceProps.js";

@@ -6,6 +6,7 @@ export interface KeyValueStorage {
 
 export const DEVICE_ID_KEY = "streamerr_device_id";
 export const SUBTITLE_PREF_KEY = "streamerr_subtitle_pref";
+export const AUDIO_LANG_PREF_KEY = "streamerr_audio_lang_pref";
 export const BW_PROBE_CACHE_KEY = "streamerr.bwProbe";
 
 export async function readStorage(storage: KeyValueStorage | undefined, key: string): Promise<string | null> {
