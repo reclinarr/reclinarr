@@ -23,6 +23,7 @@ function makeDb() {
       stream_id TEXT,
       title TEXT,
       catalogue_language TEXT,
+      language_confidence TEXT,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (tmdb_id, media_type)
     );
@@ -33,7 +34,7 @@ function makeDb() {
 function seerrMovie(tmdbId: number, title: string): Media {
   return {
     identity: { tmdbId, mediaType: "movie" },
-    metadata: { title },
+    metadata: { title, originalLanguage: "en" },
     availability: [
       {
         provider: "seerr",
@@ -100,6 +101,7 @@ describe("resolveMediaByTmdb", () => {
           uuid: "fight-club",
           title: "EN - Fight Club",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       new Date(),
@@ -141,21 +143,30 @@ describe("resolveMediaByTmdb", () => {
       },
       dispatcharr: {
         getPreferredLanguages: () => ["en"],
-        findVodByTmdb: async () => ({
-          identity: { tmdbId: 550, mediaType: "movie" as const },
-          metadata: { title: "EN - Fight Club" },
-          availability: [
-            {
-              provider: "dispatcharr" as const,
-              available: true,
-              canPlay: true,
-              movieId: 99,
-              uuid: "fight-club",
-              catalogueLanguage: "en",
-            },
-          ],
-          preferredAction: "PLAY_IPTV" as const,
-        }),
+        findVodByTmdb: async (
+          _tmdbId: number,
+          _mediaType: "movie" | "tv",
+          opts?: { reference?: { originalLanguage?: string } },
+        ) => {
+          expect(opts?.reference?.originalLanguage).toBe("en");
+          return {
+            identity: { tmdbId: 550, mediaType: "movie" as const },
+            metadata: { title: "EN - Fight Club" },
+            availability: [
+              {
+                provider: "dispatcharr" as const,
+                available: true,
+                canPlay: true,
+                movieId: 99,
+                uuid: "fight-club",
+                catalogueLanguage: "en",
+                languageConfidence: "confirmed" as const,
+                candidates: [],
+              },
+            ],
+            preferredAction: "PLAY_IPTV" as const,
+          };
+        },
       },
       acquisitions: { cacheAvailabilityFor: () => null },
     } as unknown as Parameters<typeof resolveMediaAvailabilityByTmdb>[0];
@@ -165,6 +176,7 @@ describe("resolveMediaByTmdb", () => {
     const indexed = db.select().from(schema.dispatcharrTmdbIndex).all();
     expect(indexed).toHaveLength(1);
     expect(indexed[0]?.uuid).toBe("fight-club");
+    expect(indexed[0]?.languageConfidence).toBe("confirmed");
   });
 });
 
@@ -181,6 +193,7 @@ describe("enrichDiscoveryRow", () => {
           uuid: "fight-club",
           title: "EN - Fight Club",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       new Date(),
@@ -198,6 +211,32 @@ describe("enrichDiscoveryRow", () => {
     );
   });
 
+  it("does not offer an untagged index row that was never corroborated", () => {
+    const db = makeDb();
+    db.insert(schema.dispatcharrTmdbIndex)
+      .values({
+        tmdbId: 550,
+        mediaType: "movie",
+        dispatcharrId: 99,
+        uuid: "untagged",
+        streamId: null,
+        title: "NF - Fight Club",
+        catalogueLanguage: null,
+        languageConfidence: null,
+        updatedAt: new Date(),
+      })
+      .run();
+
+    const ctx = {
+      db,
+      dispatcharr: { getPreferredLanguages: () => ["en"] },
+    } as unknown as Parameters<typeof enrichDiscoveryRow>[0];
+
+    const [out] = enrichDiscoveryRow(ctx, [seerrMovie(550, "Fight Club")]);
+    expect(out?.preferredAction).toBe("REQUEST");
+    expect(out?.availability.some((a) => a.provider === "dispatcharr")).toBe(false);
+  });
+
   it("keeps a Seerr-only title as REQUEST (Download on the card)", () => {
     const db = makeDb();
     const ctx = {
@@ -210,7 +249,7 @@ describe("enrichDiscoveryRow", () => {
     expect(out?.availability.some((a) => a.provider === "dispatcharr")).toBe(false);
   });
 
-  it("marks indexed series available without canPlay so the card opens details", () => {
+  it("marks indexed series as playable on demand", () => {
     const db = makeDb();
     applyCatalogWinners(
       db,
@@ -222,6 +261,7 @@ describe("enrichDiscoveryRow", () => {
           uuid: "breaking-bad",
           title: "EN - Breaking Bad",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       new Date(),
@@ -235,9 +275,8 @@ describe("enrichDiscoveryRow", () => {
     const [out] = enrichDiscoveryRow(ctx, [seerrSeries(1396, "Breaking Bad")]);
     const da = out?.availability.find((a) => a.provider === "dispatcharr");
     expect(da?.available).toBe(true);
-    expect(da && "canPlay" in da ? da.canPlay : undefined).toBe(false);
-    // Not PLAY_IPTV — episode-level play only.
-    expect(out?.preferredAction).toBe("REQUEST");
+    expect(da && "canPlay" in da ? da.canPlay : undefined).toBe(true);
+    expect(out?.preferredAction).toBe("PLAY_IPTV");
   });
 
   it("prefers library membership over IPTV when libraryKeys is set", () => {
@@ -252,6 +291,7 @@ describe("enrichDiscoveryRow", () => {
           uuid: "fight-club",
           title: "EN - Fight Club",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       new Date(),

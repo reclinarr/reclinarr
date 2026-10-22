@@ -23,6 +23,7 @@
     "expo": "~57.0.13",
     "expo-build-properties": "~1.0.10",
     "expo-dev-client": "~57.0.20",
+    "expo-speech-recognition": "^57.1.1",
     "expo-splash-screen": "~57.0.6",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",

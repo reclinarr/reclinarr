@@ -20,7 +20,11 @@ const SERVICE_PREFIXES = new Set([
   "pcok",
   "peacock",
   "paramount",
+  "paramount+",
+  "p+",
   "pmtp",
+  "osn",
+  "osn+",
 ]);
 
 /** Standalone quality / format tokens in a compound prefix (4K-EN, 3D-DE, …). */
@@ -36,6 +40,9 @@ const QUALITY_TOKENS = new Set([
   "dv",
   "3d",
   "plus",
+  "cam",
+  "hdcam",
+  "ts",
 ]);
 
 /**
@@ -58,79 +65,90 @@ export interface CatalogueLanguageHints {
   evidence: string[];
 }
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  eng: "en",
+  en: "en",
+  deu: "de",
+  ger: "de",
+  de: "de",
+  fra: "fr",
+  fre: "fr",
+  fr: "fr",
+  spa: "es",
+  es: "es",
+  ita: "it",
+  it: "it",
+  por: "pt",
+  pt: "pt",
+  tur: "tr",
+  tr: "tr",
+  kur: "ku",
+  ku: "ku",
+  nld: "nl",
+  dut: "nl",
+  nl: "nl",
+  pol: "pl",
+  pl: "pl",
+  rus: "ru",
+  ru: "ru",
+  jpn: "ja",
+  ja: "ja",
+  kor: "ko",
+  ko: "ko",
+  chi: "zh",
+  zho: "zh",
+  zh: "zh",
+  ara: "ar",
+  ar: "ar",
+  gre: "el",
+  ell: "el",
+  gr: "el",
+  alb: "sq",
+  sqi: "sq",
+  al: "sq",
+  fas: "fa",
+  per: "fa",
+  fa: "fa",
+  ir: "fa",
+  hin: "hi",
+  hi: "hi",
+  in: "hi",
+  swe: "sv",
+  sv: "sv",
+  nor: "no",
+  no: "no",
+  dan: "da",
+  da: "da",
+  fin: "fi",
+  fi: "fi",
+  bul: "bg",
+  bg: "bg",
+  ron: "ro",
+  rum: "ro",
+  ro: "ro",
+  heb: "he",
+  he: "he",
+  il: "he",
+  ukr: "uk",
+  uk: "uk",
+};
+
 export function normalizeLanguageTag(raw?: string | null): string | undefined {
   if (!raw) return undefined;
   const t = raw.trim().toLowerCase().replace(/_/g, "-");
   if (!t || t === "und" || t === "unknown" || t === "null") return undefined;
-  const map: Record<string, string> = {
-    eng: "en",
-    en: "en",
-    deu: "de",
-    ger: "de",
-    de: "de",
-    fra: "fr",
-    fre: "fr",
-    fr: "fr",
-    spa: "es",
-    es: "es",
-    ita: "it",
-    it: "it",
-    por: "pt",
-    pt: "pt",
-    tur: "tr",
-    tr: "tr",
-    kur: "ku",
-    ku: "ku",
-    nld: "nl",
-    dut: "nl",
-    nl: "nl",
-    pol: "pl",
-    pl: "pl",
-    rus: "ru",
-    ru: "ru",
-    jpn: "ja",
-    ja: "ja",
-    kor: "ko",
-    ko: "ko",
-    chi: "zh",
-    zho: "zh",
-    zh: "zh",
-    ara: "ar",
-    ar: "ar",
-    gre: "el",
-    ell: "el",
-    gr: "el",
-    alb: "sq",
-    sqi: "sq",
-    al: "sq",
-    fas: "fa",
-    per: "fa",
-    fa: "fa",
-    ir: "fa",
-    hin: "hi",
-    hi: "hi",
-    in: "hi",
-    swe: "sv",
-    sv: "sv",
-    nor: "no",
-    no: "no",
-    dan: "da",
-    da: "da",
-    fin: "fi",
-    fi: "fi",
-    bul: "bg",
-    bg: "bg",
-    ron: "ro",
-    rum: "ro",
-    ro: "ro",
-    heb: "he",
-    he: "he",
-    il: "he",
-    ukr: "uk",
-    uk: "uk",
-  };
   const primary = t.split("-")[0]!;
-  return map[primary] ?? (primary.length <= 3 ? primary : undefined);
+  return LANGUAGE_ALIASES[primary] ?? (primary.length <= 3 ? primary : undefined);
+}
+
+/**
+ * Catalogue prefixes mix languages with platform/quality tags (P+, CAM, OSN+),
+ * so only known aliases or plain two-letter codes count as a language there.
+ */
+function prefixLanguageTag(token: string): string | undefined {
+  const known = LANGUAGE_ALIASES[token];
+  if (known) return known;
+  return /^[a-z]{2}$/.test(token) ? token : undefined;
 }
 
 function normalizeServicePlatform(tag: string): string | undefined {
@@ -258,7 +276,7 @@ function parseCompoundPrefix(prefix: string): CatalogueLanguageHints {
       continue;
     }
 
-    const lang = normalizeLanguageTag(token);
+    const lang = prefixLanguageTag(token);
     if (lang) {
       langCandidates.push(lang);
     }
@@ -437,17 +455,152 @@ export function parsePreferredLanguages(raw?: string | null): string[] {
   return list.length ? list : ["en"];
 }
 
+/**
+ * How sure we are that an IPTV copy is in a preferred language.
+ * Only `confirmed` and `corroborated` copies may be offered for on-demand play.
+ */
+export type CatalogueLanguageConfidence = "confirmed" | "corroborated" | "unknown" | "mismatch";
+
+export type PlayableLanguageConfidence = Extract<
+  CatalogueLanguageConfidence,
+  "confirmed" | "corroborated"
+>;
+
+/** TMDb facts used to vouch for untagged IPTV copies. */
+export interface TmdbLanguageReference {
+  title?: string;
+  originalTitle?: string;
+  /** TMDb original_language (ISO 639-1). */
+  originalLanguage?: string;
+}
+
+/** Build a reference from TMDb (Seerr) metadata; undefined when original language is unknown. */
+export function tmdbLanguageReference(
+  metadata?: { title?: string; originalTitle?: string; originalLanguage?: string } | null,
+): TmdbLanguageReference | undefined {
+  if (!metadata?.originalLanguage) return undefined;
+  return {
+    title: metadata.title,
+    originalTitle: metadata.originalTitle,
+    originalLanguage: metadata.originalLanguage,
+  };
+}
+
+export function isPlayableLanguageConfidence(
+  confidence?: CatalogueLanguageConfidence | null,
+): confidence is PlayableLanguageConfidence {
+  return confidence === "confirmed" || confidence === "corroborated";
+}
+
+/** Uppercase catalogue code block ("EN", "4K-EN", "AR-SUBS", "D+") — not a real title word. */
+const CODE_PREFIX = /^[A-Z0-9+]{1,6}(?:[-_/][A-Z0-9+]{1,6})*$/;
+
+function normalizeTitleText(raw: string): string {
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function stripTrailingTags(raw: string): string {
+  let out = raw.trim();
+  // "(2019)", "(US)", "[4K]" — repeatable trailing tags.
+  while (/\s*[([][^()[\]]*[)\]]\s*$/.test(out)) {
+    out = out.replace(/\s*[([][^()[\]]*[)\]]\s*$/, "").trim();
+  }
+  return out.replace(/\s+(?:19|20)\d{2}$/, "").trim();
+}
+
+/**
+ * Comparable forms of an IPTV title: as-is and with leading catalogue code
+ * blocks ("EN - ", "4K-D+ - ") removed. Both drop trailing year/country tags.
+ */
+export function catalogueTitleForms(name: string): string[] {
+  const forms = new Set<string>();
+  const raw = normalizeTitleText(stripTrailingTags(name));
+  if (raw) forms.add(raw);
+
+  let rest = name.trim();
+  for (let i = 0; i < 3; i++) {
+    const m = rest.match(LEADING_PREFIX);
+    if (!m?.[1] || !CODE_PREFIX.test(m[1].replace(/\s+/g, ""))) break;
+    rest = rest.slice(m[0].length);
+  }
+  const stripped = normalizeTitleText(stripTrailingTags(rest));
+  if (stripped) forms.add(stripped);
+  return [...forms];
+}
+
+function titleMatchesReference(name: string, reference: TmdbLanguageReference): boolean {
+  const refs = [reference.title, reference.originalTitle]
+    .filter((t): t is string => Boolean(t?.trim()))
+    .map((t) => normalizeTitleText(stripTrailingTags(t)))
+    .filter(Boolean);
+  if (!refs.length) return false;
+  return catalogueTitleForms(name).some((form) => refs.includes(form));
+}
+
+/**
+ * Classify one IPTV copy. Explicit tags (audio, category, title prefix) decide
+ * on their own; untagged copies are only trusted when TMDb vouches for them:
+ * the title matches exactly AND the original language is preferred.
+ */
+export function assessCatalogueLanguage(input: {
+  preferredLanguages: string[];
+  catalogueLanguage?: string;
+  audioLanguages?: string[];
+  name?: string;
+  reference?: TmdbLanguageReference;
+}): { confidence: CatalogueLanguageConfidence; matched?: string } {
+  const preferred = input.preferredLanguages
+    .map((l) => normalizeLanguageTag(l))
+    .filter((l): l is string => Boolean(l));
+  if (!preferred.length) preferred.push("en");
+
+  const audio = (input.audioLanguages ?? [])
+    .map((l) => normalizeLanguageTag(l))
+    .filter((l): l is string => Boolean(l));
+  if (audio.length) {
+    const hit = preferred.find((p) => audio.includes(p));
+    return hit ? { confidence: "confirmed", matched: hit } : { confidence: "mismatch" };
+  }
+
+  const catalogue = normalizeLanguageTag(input.catalogueLanguage);
+  if (catalogue) {
+    return preferred.includes(catalogue)
+      ? { confidence: "confirmed", matched: catalogue }
+      : { confidence: "mismatch" };
+  }
+
+  const original = normalizeLanguageTag(input.reference?.originalLanguage);
+  if (
+    original &&
+    preferred.includes(original) &&
+    input.name &&
+    input.reference &&
+    titleMatchesReference(input.name, input.reference)
+  ) {
+    return { confidence: "corroborated", matched: original };
+  }
+  return { confidence: "unknown" };
+}
+
 export interface CatalogueLanguageScored<T> {
   item: T;
   score: number;
   qualityScore: number;
   catalogueLanguage?: string;
   qualityHeight?: number;
+  confidence: PlayableLanguageConfidence;
 }
 
 /**
- * Soft-drop obvious catalogue language mismatches when a better variant exists,
- * then pick the highest language score, then quality (stable id tie-break).
+ * Keep only copies whose language is confirmed by a tag or corroborated by TMDb,
+ * then pick confirmed over corroborated, the highest language score, then quality
+ * (stable id tie-break). No trustworthy copy → null, so the title stays requestable.
  */
 export function pickPreferredByCatalogueLanguage<T>(
   items: T[],
@@ -456,38 +609,45 @@ export function pickPreferredByCatalogueLanguage<T>(
     nameOf: (item: T) => string;
     idOf: (item: T) => number | string;
     groupOf?: (item: T) => string | undefined;
+    reference?: TmdbLanguageReference;
   },
 ): CatalogueLanguageScored<T> | null {
   if (!items.length) return null;
 
-  const scored: CatalogueLanguageScored<T>[] = items.map((item) => {
-    const hints = parseCatalogueLanguageHints({
-      name: opts.nameOf(item),
-      group: opts.groupOf?.(item),
+  const pool: CatalogueLanguageScored<T>[] = [];
+  for (const item of items) {
+    const name = opts.nameOf(item);
+    const hints = parseCatalogueLanguageHints({ name, group: opts.groupOf?.(item) });
+    const { confidence, matched } = assessCatalogueLanguage({
+      preferredLanguages,
+      catalogueLanguage: hints.language,
+      name,
+      reference: opts.reference,
     });
+    if (!isPlayableLanguageConfidence(confidence)) continue;
+    // Corroborated copies carry the TMDb original language so later checks can re-verify it.
+    const catalogueLanguage = hints.language ?? matched;
     const { score } = scoreLanguagePreference({
       preferredLanguages,
       catalogueLanguage: hints.language,
     });
     const qualityScore = scoreQualityPreference({
-      label: opts.nameOf(item),
+      label: name,
       qualityHeight: hints.qualityHeight,
       hdr: hints.hdr,
     });
-    return {
+    pool.push({
       item,
       score,
       qualityScore,
-      catalogueLanguage: hints.language,
+      catalogueLanguage,
       qualityHeight: hints.qualityHeight,
-    };
-  });
+      confidence,
+    });
+  }
 
-  const kept = scored.filter(
-    (s) => !isObviousLanguageMismatch(preferredLanguages, s.catalogueLanguage),
-  );
-  const pool = kept.length ? kept : scored;
   pool.sort((a, b) => {
+    if (a.confidence !== b.confidence) return a.confidence === "confirmed" ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
     if (b.qualityScore !== a.qualityScore) return b.qualityScore - a.qualityScore;
     return String(opts.idOf(a.item)).localeCompare(String(opts.idOf(b.item)));
@@ -506,24 +666,17 @@ export type RankableStreamCandidate = {
 };
 
 /**
- * Rank IPTV stream candidates: preferred language first, then quality (4K > unknown).
+ * Filter and rank IPTV stream candidates for one title.
+ * Wrong-language streams are always dropped. Untagged streams are dropped when a
+ * confirmed stream exists; otherwise they inherit the title-level verdict
+ * (`untaggedPlayable`). Survivors rank by language, then quality (4K > unknown).
  */
 export function rankDispatcharrStreamCandidates<T extends RankableStreamCandidate>(
   candidates: T[],
   preferredLanguages: string[],
+  opts?: { untaggedPlayable?: boolean },
 ): Array<T & RankableStreamCandidate> {
-  if (candidates.length <= 1) {
-    return candidates.map((c) => {
-      const hints = parseCatalogueLanguageHints({ name: c.label });
-      return {
-        ...c,
-        catalogueLanguage: c.catalogueLanguage ?? hints.language,
-        resolutionHeight: c.resolutionHeight ?? hints.qualityHeight,
-        hdr: c.hdr ?? hints.hdr,
-      };
-    });
-  }
-
+  const untaggedPlayable = opts?.untaggedPlayable ?? true;
   const ranked = candidates.map((c, index) => {
     const hints = parseCatalogueLanguageHints({ name: c.label });
     const lang = c.catalogueLanguage ?? hints.language;
@@ -539,6 +692,10 @@ export function rankDispatcharrStreamCandidates<T extends RankableStreamCandidat
       qualityHeight: height,
       hdr,
     });
+    const { confidence } = assessCatalogueLanguage({
+      preferredLanguages,
+      catalogueLanguage: lang,
+    });
     return {
       c: {
         ...c,
@@ -546,17 +703,25 @@ export function rankDispatcharrStreamCandidates<T extends RankableStreamCandidat
         resolutionHeight: height,
         hdr,
       },
+      confidence,
       languageScore,
       qualityScore,
       index,
     };
   });
 
-  ranked.sort(
+  const anyConfirmed = ranked.some((r) => r.confidence === "confirmed");
+  const kept = ranked.filter((r) => {
+    if (r.confidence === "confirmed") return true;
+    if (r.confidence === "mismatch") return false;
+    return !anyConfirmed && untaggedPlayable;
+  });
+
+  kept.sort(
     (a, b) =>
       b.languageScore - a.languageScore ||
       b.qualityScore - a.qualityScore ||
       a.index - b.index,
   );
-  return ranked.map((r) => r.c);
+  return kept.map((r) => r.c);
 }

@@ -78,7 +78,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         title: track.label || track.language || "Subtitle",
         language: (track.language?.slice(0, 2).toLowerCase() || "en") as "en",
         type: TextTrackType.VTT,
-        uri: playbackMediaUrl(track.url, origin, props.headers["x-streamerr-session"]),
+        uri: playbackMediaUrl(track.url, origin, props.headers["x-reclinarr-session"]),
       }))
     : [];
 
@@ -134,6 +134,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         })
       }
       onBuffer={(e) => props.onBuffer?.({ isBuffering: e.isBuffering })}
+      onReadyForDisplay={() => props.onReadyForDisplay?.()}
       onEnd={() => props.onEnd()}
       onError={(e) => {
         const err = e.error;

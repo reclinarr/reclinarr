@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -16,10 +16,11 @@ import { Focusable } from "../Focusable.js";
 import { MediaRail } from "../MediaRail.js";
 import { HomeSkeleton } from "../Skeleton.js";
 import { openMedia } from "../media-nav.js";
+import { recallRailFocus, rememberRailFocus } from "../railFocusMemory.js";
 import { colors } from "../theme.js";
 import { usePlayMedia } from "../hooks/usePlayMedia.js";
 import { measureAndScrollIntoView } from "../tvScroll.js";
-import { webBg } from "../webStyle.js";
+import { FOCUS_ROOM, webBg } from "../webStyle.js";
 import type { ScreenChromeProps } from "./types.js";
 
 export function HomeScreen({
@@ -38,7 +39,7 @@ export function HomeScreen({
   const focusedRail = useRef<string | null>(null);
   const tv = focusMode === "tv";
   const web = appearance === "web";
-
+  const [restore] = useState(() => (tv ? recallRailFocus("home", homeQuery.data?.rows ?? []) : null));
   const featured = useMemo(() => {
     for (const row of homeQuery.data?.rows ?? []) {
       if (row.items[0]) return row.items[0];
@@ -50,6 +51,9 @@ export function HomeScreen({
     if (!tv) return;
     measureAndScrollIntoView(railRefs.current[rowId], scrollRef, scrollY, layout.height ?? 0, {
       topInset: layout.headerH ?? 0,
+      pad: 40,
+      bottomExtra: FOCUS_ROOM,
+      align: "start",
     });
   }
 
@@ -57,6 +61,11 @@ export function HomeScreen({
     if (focusedRail.current === rowId) return;
     focusedRail.current = rowId;
     ensureRailVisible(rowId);
+  }
+
+  function scrollToTop() {
+    focusedRail.current = null;
+    if (scrollY.current > 0) scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -85,12 +94,18 @@ export function HomeScreen({
             layout={layout}
             variant="bleed"
             focusMode={focusMode}
-            playLabel={
-              playMedia.isPending ? bufferStatus || "Resolving…" : actionLabel(featured).replace(/^▶\s*/, "")
-            }
+            busyLabel={playMedia.isPending ? bufferStatus || "Resolving…" : null}
             bufferStatus={bufferStatus}
-            onPlay={() => playMedia.mutate(featured)}
-            onInfo={() => open(featured)}
+            preferFocus={!restore}
+            onFocusActions={tv ? scrollToTop : undefined}
+            onPlay={(media) => {
+              rememberRailFocus("home", null);
+              playMedia.mutate(media);
+            }}
+            onInfo={() => {
+              rememberRailFocus("home", null);
+              open(featured);
+            }}
           />
         ) : null}
         {!web && featured ? (
@@ -117,7 +132,7 @@ export function HomeScreen({
                   <Cta
                     label={actionLabel(featured).replace(/^▶\s*/, "")}
                     onPress={() => playMedia.mutate(featured)}
-                    hasTVPreferredFocus={tv || undefined}
+                    hasTVPreferredFocus={(tv && !restore) || undefined}
                   />
                 ) : null}
                 {tv ? (
@@ -139,10 +154,17 @@ export function HomeScreen({
             showFocusRing={tv}
             railIndex={rowIndex}
             ranked={row.id === "top10"}
-            onOpen={open}
-            onPlay={(media) => playMedia.mutate(media)}
+            onOpen={(media, index) => {
+              rememberRailFocus("home", { rowId: row.id, index });
+              open(media);
+            }}
+            onPlay={(media, index) => {
+              rememberRailFocus("home", { rowId: row.id, index });
+              playMedia.mutate(media);
+            }}
             onFocusCard={tv ? () => onRailCardFocus(row.id) : undefined}
-            preferFirst={tv && rowIndex === 0 && !featured}
+            preferFirst={tv && rowIndex === 0 && !featured && !restore}
+            preferIndex={restore?.rowId === row.id ? restore.index : undefined}
             railRef={tv ? (r) => { railRefs.current[row.id] = r; } : undefined}
           />
         ))}

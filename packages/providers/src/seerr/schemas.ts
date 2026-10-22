@@ -65,6 +65,20 @@ const MediaInfoSchema = z
           .passthrough(),
       )
       .optional(),
+    /** Live Radarr/Sonarr queue entries (non-4K). */
+    downloadStatus: z
+      .array(
+        z
+          .object({
+            size: z.number().optional(),
+            sizeLeft: z.number().optional(),
+            status: z.string().optional(),
+            timeLeft: z.string().nullable().optional(),
+            estimatedCompletionTime: z.string().nullable().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
   })
   .passthrough();
 
@@ -76,6 +90,7 @@ export const SeerrSearchResultSchema = z
     name: z.string().optional(),
     originalTitle: z.string().optional(),
     originalName: z.string().optional(),
+    originalLanguage: z.string().nullable().optional(),
     overview: z.string().optional().nullable(),
     posterPath: z.string().optional().nullable(),
     backdropPath: z.string().optional().nullable(),
@@ -152,6 +167,7 @@ export const SeerrMovieDetailsSchema = z
     id: z.number(),
     title: z.string(),
     originalTitle: z.string().optional(),
+    originalLanguage: z.string().nullable().optional(),
     imdbId: z.string().nullable().optional(),
     externalIds: ExternalIdsSchema.nullable().optional(),
     overview: z.string().optional().nullable(),
@@ -211,6 +227,7 @@ export const SeerrTvDetailsSchema = z
     id: z.number(),
     name: z.string(),
     originalName: z.string().optional(),
+    originalLanguage: z.string().nullable().optional(),
     imdbId: z.string().nullable().optional(),
     externalIds: ExternalIdsSchema.nullable().optional(),
     overview: z.string().optional().nullable(),

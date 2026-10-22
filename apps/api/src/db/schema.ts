@@ -68,6 +68,8 @@ export const dispatcharrTmdbIndex = sqliteTable(
     title: text("title"),
     /** Catalogue language of the ranked pick (en, it, …). */
     catalogueLanguage: text("catalogue_language"),
+    /** `confirmed` (explicit tag) or `corroborated` (untagged, vouched for by TMDb). */
+    languageConfidence: text("language_confidence"),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.tmdbId, t.mediaType] })],

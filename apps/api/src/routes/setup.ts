@@ -2,20 +2,58 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../context.js";
-import { ensureSetupToken, writeSetupConfig } from "../setup-store.js";
+import { probeSetupService } from "../setup-probe.js";
+import { ensureSetupToken, readSetupConfig, writeSetupConfig } from "../setup-store.js";
+
+const optionalUrl = z.string().url().optional().or(z.literal(""));
 
 const SetupSchema = z.object({
   setupCode: z.string().min(1),
   JELLYFIN_URL: z.string().url(),
-  SEERR_URL: z.string().url().optional().or(z.literal("")),
+  SEERR_URL: optionalUrl,
   SEERR_API_KEY: z.string().optional(),
-  DISPATCHARR_URL: z.string().url().optional().or(z.literal("")),
+  DISPATCHARR_URL: optionalUrl,
   DISPATCHARR_API_KEY: z.string().optional(),
   DISPATCHARR_USERNAME: z.string().optional(),
   DISPATCHARR_PASSWORD: z.string().optional(),
-  BAZARR_URL: z.string().url().optional().or(z.literal("")),
+  BAZARR_URL: optionalUrl,
   BAZARR_API_KEY: z.string().optional(),
 });
+
+const TestSchema = z.discriminatedUnion("service", [
+  z.object({ setupCode: z.string().min(1), service: z.literal("code") }),
+  z.object({
+    setupCode: z.string().min(1),
+    service: z.literal("jellyfin"),
+    JELLYFIN_URL: z.string().optional(),
+  }),
+  z.object({
+    setupCode: z.string().min(1),
+    service: z.literal("seerr"),
+    SEERR_URL: z.string().optional(),
+    SEERR_API_KEY: z.string().optional(),
+  }),
+  z.object({
+    setupCode: z.string().min(1),
+    service: z.literal("dispatcharr"),
+    DISPATCHARR_URL: z.string().optional(),
+    DISPATCHARR_API_KEY: z.string().optional(),
+    DISPATCHARR_USERNAME: z.string().optional(),
+    DISPATCHARR_PASSWORD: z.string().optional(),
+  }),
+  z.object({
+    setupCode: z.string().min(1),
+    service: z.literal("bazarr"),
+    BAZARR_URL: z.string().optional(),
+    BAZARR_API_KEY: z.string().optional(),
+  }),
+]);
+
+function codesMatch(supplied: string, expected: string): boolean {
+  const given = Buffer.from(supplied);
+  const actual = Buffer.from(expected);
+  return given.length === actual.length && timingSafeEqual(given, actual);
+}
 
 export async function registerSetupRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const setupRequired = !ctx.config.JELLYFIN_URL.trim() && !ctx.config.RECLINARR_USE_MOCKS;
@@ -23,16 +61,31 @@ export async function registerSetupRoutes(app: FastifyInstance, ctx: AppContext)
   if (setupRequired) app.log.warn({ setupCode }, "first-run setup code");
 
   app.get("/api/setup/status", async () => ({ setupRequired }));
-  app.post("/api/setup", async (req, reply) => {
+
+  // The setup code gates connection tests so this open route cannot probe arbitrary hosts.
+  app.post("/api/setup/test", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req, reply) => {
     if (!setupRequired) return reply.code(409).send({ error: "Setup is already complete" });
-    const body = SetupSchema.parse(req.body);
-    const supplied = Buffer.from(body.setupCode);
-    const expected = Buffer.from(setupCode);
-    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    const body = TestSchema.parse(req.body);
+    if (!codesMatch(body.setupCode, setupCode)) {
       return reply.code(403).send({ error: "Setup code is incorrect" });
     }
-    const { setupCode: _code, ...values } = body;
-    writeSetupConfig(ctx.config.RECLINARR_DATA_DIR, values);
+    if (body.service === "code") return reply.send({ ok: true, message: "Setup code matches." });
+    return reply.send(await probeSetupService(body));
+  });
+
+  app.post("/api/setup", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req, reply) => {
+    if (!setupRequired) return reply.code(409).send({ error: "Setup is already complete" });
+    const body = SetupSchema.parse(req.body);
+    if (!codesMatch(body.setupCode, setupCode)) {
+      return reply.code(403).send({ error: "Setup code is incorrect" });
+    }
+    const { setupCode: _code, ...entered } = body;
+    const values: Record<string, string> = {};
+    for (const [key, value] of Object.entries(entered)) {
+      if (typeof value === "string") values[key] = value;
+    }
+    const existing = readSetupConfig(ctx.config.RECLINARR_DATA_DIR);
+    writeSetupConfig(ctx.config.RECLINARR_DATA_DIR, { ...existing, ...values });
     return reply.send({ saved: true, restartRequired: true });
   });
 }

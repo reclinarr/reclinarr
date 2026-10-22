@@ -32,6 +32,25 @@ describe("seerr map", () => {
     expect(avail.requestStatus).toBe("PENDING");
   });
 
+  it("sums Radarr/Sonarr queue entries into download progress", () => {
+    const avail = mapMediaInfoToRequestAvailability({
+      status: SeerrMediaStatus.PROCESSING,
+      requests: [{ status: SeerrRequestStatus.APPROVED }],
+      downloadStatus: [
+        { size: 1000, sizeLeft: 400, estimatedCompletionTime: "2026-10-21T19:00:00Z" },
+        { size: 3000, sizeLeft: 3000, estimatedCompletionTime: "2026-10-21T20:00:00Z" },
+        { size: 0, sizeLeft: 0 },
+      ],
+    });
+    expect(avail.requestable).toBe(false);
+    expect(avail.downloadProgress).toEqual({
+      totalBytes: 4000,
+      bytesLeft: 3400,
+      estimatedCompletionTime: "2026-10-21T20:00:00Z",
+    });
+    expect(mapMediaInfoToRequestAvailability({ status: SeerrMediaStatus.PROCESSING }).downloadProgress).toBeUndefined();
+  });
+
   it("maps movie search results", () => {
     const media = mapSearchResultToMedia({
       id: 550,

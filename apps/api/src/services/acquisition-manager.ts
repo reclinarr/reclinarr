@@ -27,6 +27,10 @@ export class AcquisitionManager {
   private readonly controllers = new Map<string, AbortController>();
   /** Identities currently entering start() — prevents duplicate IPTV pulls. */
   private readonly startingKeys = new Set<string>();
+  /** User downloads run one at a time so a season batch doesn't preempt itself or playback. */
+  private readonly downloadQueue: Array<{ id: string; controller: AbortController }> = [];
+  private downloadActive = false;
+  private downloadRetry?: ReturnType<typeof setTimeout>;
   private readonly transport = new HttpDownloadTransport();
   private onLibraryPromoted?: (localPath: string) => void | Promise<void>;
   private libraryMetaResolver?: (
@@ -177,8 +181,9 @@ export class AcquisitionManager {
             a.state === "playable" ||
             a.state === "queued" ||
             a.state === "completed" ||
-            // Failed partial downloads still need a contiguous finalize pass.
-            a.state === "failed"),
+            // Failed partials that already played still need a contiguous finalize
+            // pass; ones that never produced segments (e.g. MP4 without moov) can't.
+            (a.state === "failed" && hlsPlaybackReady(this.dataDir, a.id))),
       )
       .map((a) => ({
         id: a.id,
@@ -217,11 +222,21 @@ export class AcquisitionManager {
     });
   }
 
-  async start(input: {
-    identity: MediaIdentity;
-    mode: AcquisitionMode;
-    source: AcquisitionSource;
-  }): Promise<Acquisition> {
+  async start(
+    input: {
+      identity: MediaIdentity;
+      mode: AcquisitionMode;
+      source: AcquisitionSource;
+    },
+    opts?: {
+      /** Wait in the download queue instead of taking an IPTV slot immediately. */
+      queued?: boolean;
+    },
+  ): Promise<Acquisition> {
+    const launch = (id: string, controller: AbortController) => {
+      if (opts?.queued) this.enqueueDownload(id, controller);
+      else void this.run(id, controller);
+    };
     const key = this.identityKey(input.identity);
     // Wait briefly if another start() for the same title is in flight.
     const waitStarted = Date.now();
@@ -240,6 +255,14 @@ export class AcquisitionManager {
     this.startingKeys.add(key);
     try {
       const existing = this.findByIdentity(input.identity);
+      if (!opts?.queued && existing?.state === "queued") {
+        const waiting = this.downloadQueue.findIndex((q) => q.id === existing.id);
+        if (waiting >= 0) {
+          const [job] = this.downloadQueue.splice(waiting, 1);
+          void this.run(job!.id, job!.controller);
+          return existing;
+        }
+      }
       if (
         existing &&
         (existing.state === "downloading" ||
@@ -272,7 +295,7 @@ export class AcquisitionManager {
           source: input.source,
           updatedAt: new Date().toISOString(),
         });
-        void this.run(existing.id, controller);
+        launch(existing.id, controller);
         return this.get(existing.id)!;
       }
 
@@ -307,11 +330,41 @@ export class AcquisitionManager {
       const controller = new AbortController();
       this.controllers.set(id, controller);
       this.persist(acquisition);
-      void this.run(id, controller);
+      launch(id, controller);
       return acquisition;
     } finally {
       this.startingKeys.delete(key);
     }
+  }
+
+  private enqueueDownload(id: string, controller: AbortController): void {
+    this.downloadQueue.push({ id, controller });
+    this.pumpDownloads();
+  }
+
+  private pumpDownloads(): void {
+    if (this.downloadActive) return;
+    // Never preempt playback/live for a background download — wait for a free slot.
+    if (this.iptvConnections && this.iptvConnections.active >= this.iptvConnections.max) {
+      if (this.downloadQueue.length && !this.downloadRetry) {
+        this.downloadRetry = setTimeout(() => {
+          this.downloadRetry = undefined;
+          this.pumpDownloads();
+        }, 5_000);
+      }
+      return;
+    }
+    let next = this.downloadQueue.shift();
+    while (next && (next.controller.signal.aborted || this.get(next.id)?.state === "cancelled")) {
+      this.controllers.delete(next.id);
+      next = this.downloadQueue.shift();
+    }
+    if (!next) return;
+    this.downloadActive = true;
+    void this.run(next.id, next.controller).finally(() => {
+      this.downloadActive = false;
+      this.pumpDownloads();
+    });
   }
 
   async cancel(id: string): Promise<Acquisition | undefined> {
@@ -532,9 +585,10 @@ export class AcquisitionManager {
   private rowToAcquisition(row: typeof acquisitionsTable.$inferSelect): Acquisition {
     const mode = row.mode as AcquisitionMode;
     const updatedAt = row.updatedAt;
+    const identity = JSON.parse(row.identityJson) as MediaIdentity;
     return {
       id: row.id,
-      identity: JSON.parse(row.identityJson) as MediaIdentity,
+      identity,
       mode,
       state: row.state as Acquisition["state"],
       bytesDownloaded: row.bytesDownloaded,
@@ -545,7 +599,11 @@ export class AcquisitionManager {
       createdAt: row.createdAt,
       updatedAt,
       cacheExpiresAt:
-        mode === "cache" ? cacheExpiresAtIso(updatedAt, this.cacheTtlMs) : undefined,
+        mode !== "cache"
+          ? undefined
+          : this.cacheManager && row.state === "completed"
+            ? new Date(this.cacheManager.expiresAtMs(identity, updatedAt)).toISOString()
+            : cacheExpiresAtIso(updatedAt, this.cacheTtlMs),
     };
   }
 }

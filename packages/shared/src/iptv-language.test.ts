@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessCatalogueLanguage,
+  catalogueTitleForms,
   isObviousLanguageMismatch,
   normalizeLanguageTag,
   parseCatalogueLanguageHints,
@@ -11,6 +13,7 @@ import {
   rankDispatcharrStreamCandidates,
   scoreLanguagePreference,
   scoreQualityPreference,
+  tmdbLanguageReference,
 } from "./iptv-language.js";
 
 describe("normalizeLanguageTag", () => {
@@ -186,14 +189,65 @@ describe("pickPreferredByCatalogueLanguage", () => {
     expect(best?.item.name).not.toMatch(/^(DE|KU)\b/);
   });
 
-  it("keeps service-only NF as unknown (not mismatch-only winner)", () => {
+  it("hides untagged copies when language cannot be corroborated", () => {
     const onlyNf = [{ id: 3, name: "NF - Zootopia" }];
     const best = pickPreferredByCatalogueLanguage(onlyNf, ["en"], {
       nameOf: (i) => i.name,
       idOf: (i) => i.id,
     });
+    expect(best).toBeNull();
+  });
+
+  it("corroborates an untagged copy when TMDb title and original language match", () => {
+    const onlyNf = [{ id: 3, name: "NF - Zootopia" }];
+    const best = pickPreferredByCatalogueLanguage(onlyNf, ["en"], {
+      nameOf: (i) => i.name,
+      idOf: (i) => i.id,
+      reference: { title: "Zootopia", originalTitle: "Zootopia", originalLanguage: "en" },
+    });
     expect(best?.item.name).toBe("NF - Zootopia");
-    expect(best?.score).toBe(0);
+    expect(best?.confidence).toBe("corroborated");
+    expect(best?.catalogueLanguage).toBe("en");
+  });
+
+  it("does not corroborate when TMDb original language is not preferred", () => {
+    const onlyNf = [{ id: 3, name: "NF - Zootopia" }];
+    const best = pickPreferredByCatalogueLanguage(onlyNf, ["en"], {
+      nameOf: (i) => i.name,
+      idOf: (i) => i.id,
+      reference: { title: "Zootopia", originalLanguage: "ja" },
+    });
+    expect(best).toBeNull();
+  });
+
+  it("ranks a tagged match above a corroborated untagged copy", () => {
+    const best = pickPreferredByCatalogueLanguage(items, ["en"], {
+      nameOf: (i) => i.name,
+      idOf: (i) => i.id,
+      reference: { title: "Zootopia", originalLanguage: "en" },
+    });
+    expect(best?.item.name).toBe("EN - Zootopia");
+    expect(best?.confidence).toBe("confirmed");
+  });
+
+  it("returns no match when every copy is in another language", () => {
+    const onlyForeign = [
+      { id: 1, name: "DE - Crystal Lake (2026) (US)" },
+      { id: 2, name: "AR-SUBS - Crystal Lake (2026) (US)" },
+    ];
+    const best = pickPreferredByCatalogueLanguage(onlyForeign, ["en"], {
+      nameOf: (i) => i.name,
+      idOf: (i) => i.id,
+    });
+    expect(best).toBeNull();
+  });
+
+  it("does not read platform or quality prefixes as languages", () => {
+    expect(parseCatalogueLanguageHints({ name: "P+ - FBI (2018)" }).language).toBeUndefined();
+    expect(parseCatalogueLanguageHints({ name: "CAM - Some Film (2026)" }).language).toBeUndefined();
+    expect(parseCatalogueLanguageHints({ name: "4K-OSN+ - Game of Thrones" }).language).toBeUndefined();
+    expect(parseCatalogueLanguageHints({ name: "IR - Resident Dead" }).language).toBe("fa");
+    expect(parseCatalogueLanguageHints({ name: "AR-SUBS - Crystal Lake" }).language).toBe("ar");
   });
 
   it("prefers 4K-EN over EN when language matches", () => {
@@ -211,8 +265,78 @@ describe("pickPreferredByCatalogueLanguage", () => {
   });
 });
 
+describe("assessCatalogueLanguage", () => {
+  it("confirms an explicit matching tag", () => {
+    expect(
+      assessCatalogueLanguage({
+        preferredLanguages: ["en"],
+        catalogueLanguage: "en",
+        name: "EN - Title",
+      }),
+    ).toEqual({ confidence: "confirmed", matched: "en" });
+  });
+
+  it("flags a tagged mismatch", () => {
+    expect(
+      assessCatalogueLanguage({
+        preferredLanguages: ["en"],
+        catalogueLanguage: "de",
+        name: "DE - Title",
+      }).confidence,
+    ).toBe("mismatch");
+  });
+
+  it("corroborates an untagged title that matches TMDb in a preferred original language", () => {
+    expect(
+      assessCatalogueLanguage({
+        preferredLanguages: ["en"],
+        name: "NF - Title (2019)",
+        reference: { title: "Title", originalLanguage: "en" },
+      }),
+    ).toEqual({ confidence: "corroborated", matched: "en" });
+  });
+
+  it("stays unknown when the IPTV title does not match TMDb", () => {
+    expect(
+      assessCatalogueLanguage({
+        preferredLanguages: ["en"],
+        name: "NF - Completely Different",
+        reference: { title: "Title", originalLanguage: "en" },
+      }).confidence,
+    ).toBe("unknown");
+  });
+
+  it("stays unknown without a TMDb reference", () => {
+    expect(
+      assessCatalogueLanguage({
+        preferredLanguages: ["en"],
+        name: "NF - Title",
+      }).confidence,
+    ).toBe("unknown");
+  });
+});
+
+describe("catalogueTitleForms", () => {
+  it("strips catalogue prefixes, years, and country tags", () => {
+    expect(catalogueTitleForms("EN - Title (2019)")).toContain("title");
+    expect(catalogueTitleForms("4K-EN - Title (US)")).toContain("title");
+    expect(catalogueTitleForms("NF - Title")).toContain("title");
+  });
+});
+
+describe("tmdbLanguageReference", () => {
+  it("requires an original language", () => {
+    expect(tmdbLanguageReference({ title: "Title" })).toBeUndefined();
+    expect(tmdbLanguageReference({ title: "Title", originalLanguage: "en" })).toEqual({
+      title: "Title",
+      originalTitle: undefined,
+      originalLanguage: "en",
+    });
+  });
+});
+
 describe("rankDispatcharrStreamCandidates", () => {
-  it("prefers EN category over DE / IR when preferred is en (Fight Club-like)", () => {
+  it("drops wrong-language and untagged streams when a confirmed stream exists", () => {
     const ranked = rankDispatcharrStreamCandidates(
       [
         { streamId: "de", label: "DE - FILME 1940/2024" },
@@ -222,8 +346,32 @@ describe("rankDispatcharrStreamCandidates", () => {
       ],
       ["en"],
     );
-    expect(ranked[0]?.streamId).toBe("en");
+    expect(ranked.map((c) => c.streamId)).toEqual(["en"]);
     expect(ranked[0]?.catalogueLanguage).toBe("en");
+  });
+
+  it("keeps untagged streams only when the title-level verdict allows it", () => {
+    const kept = rankDispatcharrStreamCandidates(
+      [{ streamId: "nf", label: "NETFLIX MOVIES" }],
+      ["en"],
+      { untaggedPlayable: true },
+    );
+    expect(kept.map((c) => c.streamId)).toEqual(["nf"]);
+
+    const dropped = rankDispatcharrStreamCandidates(
+      [{ streamId: "nf", label: "NETFLIX MOVIES" }],
+      ["en"],
+      { untaggedPlayable: false },
+    );
+    expect(dropped).toEqual([]);
+  });
+
+  it("drops mismatch-only streams even when they are the only copies", () => {
+    const ranked = rankDispatcharrStreamCandidates(
+      [{ streamId: "de", label: "DE - FILME" }],
+      ["en"],
+    );
+    expect(ranked).toEqual([]);
   });
 
   it("among EN categories, prefers quality 4K over empty", () => {

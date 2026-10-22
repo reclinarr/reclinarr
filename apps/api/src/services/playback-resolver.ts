@@ -6,7 +6,12 @@ import type {
   PlaybackSource,
   SubtitleTrack,
 } from "@reclinarr/shared";
-import { normalizeLanguageTag, normalizeSubtitleLanguage, withUserPreferredLanguage } from "@reclinarr/shared";
+import {
+  normalizeLanguageTag,
+  normalizeSubtitleLanguage,
+  tmdbLanguageReference,
+  withUserPreferredLanguage,
+} from "@reclinarr/shared";
 import {
   BazarrProvider,
   DispatcharrProvider,
@@ -21,12 +26,16 @@ import type { AcquisitionManager } from "./acquisition-manager.js";
 import type { AppDb } from "../db/client.js";
 import { lookupDispatcharrIndex } from "./dispatcharr-index.js";
 import type { IptvProgressStore } from "./iptv-progress.js";
+import { probeAudioStream } from "./ffmpeg-remux.js";
 
 /**
  * Server-side only. Frontend must not implement provider priority.
  * Priority: Jellyfin → Cache (auto-started for IPTV Play) → never dual IPTV.
  */
 export class PlaybackResolver {
+  /** Container runtime per acquisition — partial cache HLS only reports the packaged window. */
+  private readonly cacheDurations = new Map<string, number>();
+
   constructor(
     private readonly jellyfin: JellyfinProvider | MockJellyfinProvider,
     private readonly dispatcharr: DispatcharrProvider | MockDispatcharrProvider,
@@ -78,8 +87,12 @@ export class PlaybackResolver {
     if (series?.identity.jellyfinItemId) {
       episodes = await this.jellyfin.listEpisodesForSeries(userContext, series.identity.jellyfinItemId);
     } else if (identity.tmdbId && this.dispatcharr.listEpisodesForSeries) {
+      const details = await this.seerrDetails("tv", identity.tmdbId);
       const vod = await this.dispatcharr.findVodByTmdb(identity.tmdbId, "tv", {
+        titleHint: details?.metadata.title,
+        yearHint: details?.metadata.year,
         preferredLanguages: this.iptvPreferredLanguages(preferredAudioLanguage),
+        reference: tmdbLanguageReference(details?.metadata),
       });
       const seriesId = vod?.availability.find((entry) => entry.provider === "dispatcharr")?.seriesId;
       if (seriesId != null) {
@@ -189,7 +202,7 @@ export class PlaybackResolver {
     }
 
     // 2) Local cache already playable
-    const readyCache = this.cachePlaybackSource(userContext, identity);
+    const readyCache = await this.cachePlaybackSource(userContext, identity);
     if (readyCache) return { status: "ready", source: readyCache };
 
     // 3) IPTV: only when the title is not in the Jellyfin library
@@ -207,11 +220,24 @@ export class PlaybackResolver {
     });
 
     if (job.playbackAvailable) {
-      const source = this.cachePlaybackSource(userContext, identity, iptv.durationSeconds);
+      const source = await this.cachePlaybackSource(userContext, identity, iptv.durationSeconds);
       if (source) return { status: "ready", source };
     }
 
     return { status: "buffering", acquisitionId: job.id };
+  }
+
+  private async cacheContainerDuration(
+    acquisitionId: string,
+    localPath?: string,
+  ): Promise<number | undefined> {
+    const known = this.cacheDurations.get(acquisitionId);
+    if (known != null) return known;
+    if (!localPath) return undefined;
+    const { durationSeconds } = await probeAudioStream({ filePath: localPath });
+    if (durationSeconds == null) return undefined;
+    this.cacheDurations.set(acquisitionId, durationSeconds);
+    return durationSeconds;
   }
 
   private async findJellyfinEpisode(
@@ -236,14 +262,17 @@ export class PlaybackResolver {
     };
   }
 
-  private cachePlaybackSource(
+  private async cachePlaybackSource(
     userContext: UserContext,
     identity: MediaIdentity,
-    durationSeconds?: number,
-  ): PlaybackSource | null {
+    catalogueDurationSeconds?: number,
+  ): Promise<PlaybackSource | null> {
     const cache = this.acquisitions?.cacheAvailabilityFor(identity);
     if (!cache?.playbackAvailable || !cache.acquisitionId) return null;
     const job = this.acquisitions?.get(cache.acquisitionId);
+    const durationSeconds =
+      (await this.cacheContainerDuration(cache.acquisitionId, job?.localPath)) ??
+      catalogueDurationSeconds;
     const progress = this.iptvProgress?.get(userContext.jellyfinUserId, identity);
     const startPositionSeconds =
       progress && !progress.completed && progress.positionSeconds > 30
@@ -277,6 +306,11 @@ export class PlaybackResolver {
    * Resolve Dispatcharr uuid/stream for acquisition + optional catalogue duration.
    * Does not return a live IPTV remux PlaybackSource (connection budget).
    */
+  private async seerrDetails(mediaType: "movie" | "tv", tmdbId: number): Promise<Media | null> {
+    if (!this.seerr?.getDetails) return null;
+    return this.seerr.getDetails(mediaType, tmdbId).catch(() => null);
+  }
+
   private iptvPreferredLanguages(userLanguage?: string): string[] {
     const server =
       this.dispatcharr instanceof DispatcharrProvider
@@ -304,17 +338,17 @@ export class PlaybackResolver {
               ?.dispatcharrId
           : undefined;
       if (seriesId === undefined && "findEpisodeBySeriesTmdb" in this.dispatcharr) {
-        let titleHint: string | undefined;
-        if (this.seerr?.getDetails) {
-          const details = await this.seerr.getDetails("tv", identity.tmdbId).catch(() => null);
-          titleHint = details?.metadata.title;
-        }
+        const details = await this.seerrDetails("tv", identity.tmdbId);
         const episode = await (this.dispatcharr as DispatcharrProvider)
           .findEpisodeBySeriesTmdb(
             identity.tmdbId,
             identity.seasonNumber ?? 0,
             identity.episodeNumber ?? 0,
-            { titleHint, preferredLanguages },
+            {
+              titleHint: details?.metadata.title,
+              preferredLanguages,
+              reference: tmdbLanguageReference(details?.metadata),
+            },
           )
           .catch(() => null);
         return acquisitionFromMedia(episode, "episode");
@@ -334,17 +368,8 @@ export class PlaybackResolver {
     }
 
     if (identity.tmdbId && (identity.mediaType === "movie" || identity.mediaType === "tv")) {
-      let titleHint: string | undefined;
-      let yearHint: number | undefined;
-      let seerrDuration: number | undefined;
-      if (this.seerr?.getDetails) {
-        const details = await this.seerr
-          .getDetails(identity.mediaType, identity.tmdbId)
-          .catch(() => null);
-        titleHint = details?.metadata.title;
-        yearHint = details?.metadata.year;
-        seerrDuration = metadataDurationSeconds(details);
-      }
+      const details = await this.seerrDetails(identity.mediaType, identity.tmdbId);
+      const seerrDuration = metadataDurationSeconds(details);
       const preferredLanguages = this.iptvPreferredLanguages(preferredAudioLanguage);
       const indexed =
         this.db != null
@@ -357,9 +382,10 @@ export class PlaybackResolver {
           : null;
       const media = await this.dispatcharr
         .findVodByTmdb(identity.tmdbId, identity.mediaType, {
-          titleHint,
-          yearHint,
+          titleHint: details?.metadata.title,
+          yearHint: details?.metadata.year,
           preferredLanguages,
+          reference: tmdbLanguageReference(details?.metadata),
           ...(indexed?.dispatcharrId != null ? { dispatcharrId: indexed.dispatcharrId } : {}),
         })
         .catch(() => null);

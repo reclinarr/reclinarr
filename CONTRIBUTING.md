@@ -109,12 +109,6 @@ Web e2e uses `RECLINARR_TEST_USERNAME` / `RECLINARR_TEST_PASSWORD` (and optional
 6. Do not commit secrets (`.env`, API keys, tokens). Keep `.env.example` as the
    documented template.
 
-### Compat notes
-
-Existing installs may still use `STREAMERR_*` env vars, `streamerr_session`
-cookies, and legacy deep links. Prefer `RECLINARR_*` in new code, but do not
-break the compatibility paths without a clear migration plan.
-
 ## Reporting issues
 
 Open an issue with:

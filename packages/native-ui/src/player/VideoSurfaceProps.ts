@@ -41,6 +41,8 @@ export type VideoSurfaceProps = {
   onError: (message: string) => void;
   /** Fired when the decoder is waiting on network / demux (web + native). */
   onBuffer?: (info: { isBuffering: boolean; bufferedFraction?: number }) => void;
+  /** First decoded frame is on screen (native SurfaceView / TextureView). */
+  onReadyForDisplay?: () => void;
   onSeekRequest?: (seek: (seconds: number) => void) => void;
   onTransportReady?: (transport: VideoTransport) => void;
 };

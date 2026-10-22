@@ -5,6 +5,7 @@ import {
   formatPlaybackIoError,
   isBehindLiveWindowError,
   isIptvConnectionLimitError,
+  isNonRecoverableLiveError,
 } from "./errors.js";
 
 describe("isIptvConnectionLimitError", () => {
@@ -70,5 +71,17 @@ describe("isBehindLiveWindowError", () => {
     expect(isBehindLiveWindowError(null, 1002)).toBe(true);
     expect(isBehindLiveWindowError(null, "21002")).toBe(true);
     expect(isBehindLiveWindowError("decoder init failed")).toBe(false);
+  });
+});
+
+describe("isNonRecoverableLiveError", () => {
+  it("treats IPTV slot conflicts as non-recoverable", () => {
+    expect(isNonRecoverableLiveError(IPTV_STREAM_BUSY_MESSAGE)).toBe(true);
+    expect(isNonRecoverableLiveError("IPTV connection limit reached")).toBe(true);
+  });
+
+  it("allows transient stream failures to retry", () => {
+    expect(isNonRecoverableLiveError("HLS error")).toBe(false);
+    expect(isNonRecoverableLiveError("Playback failed")).toBe(false);
   });
 });

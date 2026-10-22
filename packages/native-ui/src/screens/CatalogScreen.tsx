@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -8,15 +8,16 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { actionLabel, catalogRails } from "@reclinarr/client";
+import { catalogRails } from "@reclinarr/client";
 import { Billboard } from "../Billboard.js";
 import { MediaRail } from "../MediaRail.js";
 import { HomeSkeleton, RailSkeleton } from "../Skeleton.js";
 import { openMedia } from "../media-nav.js";
+import { recallRailFocus, rememberRailFocus } from "../railFocusMemory.js";
 import { colors } from "../theme.js";
 import { usePlayMedia } from "../hooks/usePlayMedia.js";
 import { measureAndScrollIntoView } from "../tvScroll.js";
-import { webBg } from "../webStyle.js";
+import { FOCUS_ROOM, webBg } from "../webStyle.js";
 import type { ScreenChromeProps } from "./types.js";
 
 export function CatalogScreen({
@@ -42,6 +43,8 @@ export function CatalogScreen({
   const scrollY = useRef(0);
   const railRefs = useRef<Record<string, View | null>>({});
   const focusedRail = useRef<string | null>(null);
+  const focusPage = `catalog:${mediaType}`;
+  const [restore] = useState(() => (tv ? recallRailFocus(focusPage, rows) : null));
   const featured = useMemo(() => {
     if (!web) return null;
     for (const row of rows) {
@@ -57,6 +60,9 @@ export function CatalogScreen({
     if (!tv) return;
     measureAndScrollIntoView(railRefs.current[rowId], scrollRef, scrollY, layout.height ?? 0, {
       topInset: layout.headerH ?? 0,
+      pad: 40,
+      bottomExtra: FOCUS_ROOM,
+      align: "start",
     });
   }
 
@@ -64,6 +70,11 @@ export function CatalogScreen({
     if (focusedRail.current === rowId) return;
     focusedRail.current = rowId;
     ensureRailVisible(rowId);
+  }
+
+  function scrollToTop() {
+    focusedRail.current = null;
+    if (scrollY.current > 0) scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -97,12 +108,18 @@ export function CatalogScreen({
             layout={layout}
             variant="inset"
             focusMode={focusMode}
-            playLabel={
-              playMedia.isPending ? bufferStatus || "Resolving…" : actionLabel(featured).replace(/^▶\s*/, "")
-            }
+            busyLabel={playMedia.isPending ? bufferStatus || "Resolving…" : null}
             bufferStatus={bufferStatus}
-            onPlay={() => playMedia.mutate(featured)}
-            onInfo={() => open(featured)}
+            preferFocus={!restore}
+            onFocusActions={tv ? scrollToTop : undefined}
+            onPlay={(media) => {
+              rememberRailFocus(focusPage, null);
+              playMedia.mutate(media);
+            }}
+            onInfo={() => {
+              rememberRailFocus(focusPage, null);
+              open(featured);
+            }}
           />
         ) : null}
         {rows.map((row, railIndex) => (
@@ -114,9 +131,16 @@ export function CatalogScreen({
             appearance={appearance}
             showFocusRing={tv}
             railIndex={railIndex}
-            onOpen={open}
-            onPlay={(media) => playMedia.mutate(media)}
+            onOpen={(media, index) => {
+              rememberRailFocus(focusPage, { rowId: row.id, index });
+              open(media);
+            }}
+            onPlay={(media, index) => {
+              rememberRailFocus(focusPage, { rowId: row.id, index });
+              playMedia.mutate(media);
+            }}
             onFocusCard={tv ? () => onRailCardFocus(row.id) : undefined}
+            preferIndex={restore?.rowId === row.id ? restore.index : undefined}
             railRef={tv ? (r) => { railRefs.current[row.id] = r; } : undefined}
           />
         ))}

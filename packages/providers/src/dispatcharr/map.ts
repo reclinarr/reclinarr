@@ -1,4 +1,8 @@
-import type { DispatcharrStreamCandidate, Media } from "@reclinarr/shared";
+import type {
+  DispatcharrStreamCandidate,
+  Media,
+  PlayableLanguageConfidence,
+} from "@reclinarr/shared";
 import { parseCatalogueLanguageHints, resolvePreferredAction } from "@reclinarr/shared";
 import type { DispatcharrEpisode, DispatcharrMovie, DispatcharrSeries } from "./schemas.js";
 
@@ -31,6 +35,7 @@ export function mapMovieToMedia(
   opts?: {
     candidates?: DispatcharrStreamCandidate[];
     catalogueLanguage?: string;
+    languageConfidence?: PlayableLanguageConfidence;
   },
 ): Media {
   const tmdbId = parseTmdbId(movie.tmdb_id);
@@ -46,6 +51,7 @@ export function mapMovieToMedia(
       tmdbId: movie.tmdb_id != null ? String(movie.tmdb_id) : undefined,
       imdbId: movie.imdb_id ?? undefined,
       catalogueLanguage,
+      ...(opts?.languageConfidence ? { languageConfidence: opts.languageConfidence } : {}),
       candidates,
       canPlay: true,
     },
@@ -69,7 +75,7 @@ export function mapMovieToMedia(
 
 export function mapSeriesToMedia(
   series: DispatcharrSeries,
-  opts?: { catalogueLanguage?: string },
+  opts?: { catalogueLanguage?: string; languageConfidence?: PlayableLanguageConfidence },
 ): Media {
   const tmdbId = parseTmdbId(series.tmdb_id);
   const catalogueLanguage =
@@ -83,9 +89,10 @@ export function mapSeriesToMedia(
       tmdbId: series.tmdb_id != null ? String(series.tmdb_id) : undefined,
       imdbId: series.imdb_id ?? undefined,
       catalogueLanguage,
+      ...(opts?.languageConfidence ? { languageConfidence: opts.languageConfidence } : {}),
       candidates: [],
-      // Episode-level play lands in Phase 7; mark series available but not directly playable.
-      canPlay: false,
+      // Series Play resolves to the resume/first episode server-side; the uuid itself is not a stream.
+      canPlay: true,
     },
   ];
   return {

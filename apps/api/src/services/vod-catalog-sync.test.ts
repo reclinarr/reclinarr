@@ -21,6 +21,7 @@ function makeDb() {
       stream_id TEXT,
       title TEXT,
       catalogue_language TEXT,
+      language_confidence TEXT,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (tmdb_id, media_type)
     );
@@ -57,6 +58,31 @@ describe("pickCatalogWinners", () => {
     expect(winners).toHaveLength(1);
     expect(winners[0]?.dispatcharrId).toBe(2);
     expect(winners[0]?.catalogueLanguage).toBe("en");
+    expect(winners[0]?.languageConfidence).toBe("confirmed");
+  });
+
+  it("skips untagged-only titles unless TMDb corroborates them", () => {
+    const candidates: VodCatalogCandidate[] = [
+      {
+        dispatcharrId: 3,
+        uuid: "c",
+        name: "NF - Zootopia",
+        tmdbId: 269149,
+        mediaType: "movie",
+      },
+    ];
+    expect(pickCatalogWinners(candidates, ["en"])).toHaveLength(0);
+
+    const refs = new Map([
+      [
+        "movie:269149",
+        { title: "Zootopia", originalLanguage: "en" },
+      ],
+    ]);
+    const corroborated = pickCatalogWinners(candidates, ["en"], refs);
+    expect(corroborated).toHaveLength(1);
+    expect(corroborated[0]?.languageConfidence).toBe("corroborated");
+    expect(corroborated[0]?.catalogueLanguage).toBe("en");
   });
 
   it("keeps movie and series for the same TMDb id separate", () => {
@@ -117,6 +143,7 @@ describe("applyCatalogWinners", () => {
           uuid: "old",
           title: "Old",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       t0,
@@ -133,6 +160,7 @@ describe("applyCatalogWinners", () => {
           uuid: "keep-new",
           title: "Keep Updated",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       t1,
@@ -158,6 +186,7 @@ describe("applyCatalogWinners", () => {
           uuid: "old",
           title: "Old",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
         {
           tmdbId: 2,
@@ -166,6 +195,7 @@ describe("applyCatalogWinners", () => {
           uuid: "keep-old",
           title: "Keep",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       t0,
@@ -183,6 +213,7 @@ describe("applyCatalogWinners", () => {
           uuid: "keep-new",
           title: "Keep Updated",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
         {
           tmdbId: 3,
@@ -191,6 +222,7 @@ describe("applyCatalogWinners", () => {
           uuid: "new",
           title: "New Show",
           catalogueLanguage: "en",
+          languageConfidence: "confirmed",
         },
       ],
       t1,
@@ -212,7 +244,7 @@ describe("collectHotVodTargets", () => {
   it("dedupes Seerr home and catalog rails by mediaType:tmdbId", async () => {
     const movie = (tmdbId: number, title: string): Media => ({
       identity: { tmdbId, mediaType: "movie" },
-      metadata: { title, year: 2020 },
+      metadata: { title, year: 2020, originalLanguage: "en" },
       availability: [],
       preferredAction: "REQUEST",
     });
@@ -223,7 +255,7 @@ describe("collectHotVodTargets", () => {
         [
           {
             identity: { tmdbId: 10, mediaType: "tv" as const },
-            metadata: { title: "Show", year: 2021 },
+            metadata: { title: "Show", year: 2021, originalLanguage: "en" },
             availability: [],
             preferredAction: "REQUEST" as const,
           },
@@ -234,5 +266,10 @@ describe("collectHotVodTargets", () => {
     const keys = targets.map((t) => `${t.mediaType}:${t.tmdbId}`).sort();
     expect(keys).toEqual(["movie:1", "movie:2", "movie:3", "tv:10"]);
     expect(targets.find((t) => t.tmdbId === 1)?.titleHint).toBe("One");
+    expect(targets.find((t) => t.tmdbId === 1)?.reference).toEqual({
+      title: "One",
+      originalTitle: undefined,
+      originalLanguage: "en",
+    });
   });
 });

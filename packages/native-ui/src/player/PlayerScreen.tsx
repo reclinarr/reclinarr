@@ -24,6 +24,7 @@ import {
   canPlayMedia,
   isIptvProgressSource,
   listPlaybackSubtitles,
+  liveChannels,
   loadSubtitlePref,
   playbackMediaUrl,
   playLiveChannel,
@@ -43,6 +44,7 @@ import {
 import {
   formatPlaybackIoError,
   isBehindLiveWindowError,
+  isNonRecoverableLiveError,
   type EpisodeListItem,
   type MediaIdentity,
   type PlaybackSource,
@@ -80,6 +82,8 @@ const SKIP_S = 10;
 const SEEK_HOLD_DELAY_MS = 320;
 /** Interval between repeated seeks while an arrow key is held. */
 const SEEK_HOLD_INTERVAL_MS = 280;
+/** Silent live reloads before surfacing an error (upstream blips / remux exits). */
+const LIVE_RECOVER_MAX = 8;
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
@@ -230,6 +234,11 @@ export function PlayerScreen({
   const barWidthRef = useRef(0);
   const barElRef = useRef<View>(null);
   const knownDurationRef = useRef(0);
+  /** Remount the surface after a live reload (URL often stays the same). */
+  const [liveRecoveryGen, setLiveRecoveryGen] = useState(0);
+  const liveRecoverAttempts = useRef(0);
+  const liveRecovering = useRef(false);
+  const liveRecoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const client = getClient();
   const isLive = Boolean(params.live);
   const identity = params.identity;
@@ -252,6 +261,17 @@ export function PlayerScreen({
     setPaused((p) => !p);
     reveal();
   }, [reveal]);
+
+  /**
+   * TV `select` reaches both the remote handler (key down) and the focused
+   * Play/Pause Pressable (key up). Ignore the button so one click does not
+   * toggle twice.
+   */
+  const suppressChromeToggleAt = useRef(0);
+  const togglePauseFromChrome = useCallback(() => {
+    if (Date.now() - suppressChromeToggleAt.current < 450) return;
+    togglePause();
+  }, [togglePause]);
 
   /** Seek relative to the latest position (safe for key-repeat timers). */
   const skipBy = useCallback(
@@ -288,9 +308,31 @@ export function PlayerScreen({
   );
 
   usePlayerRemote((eventType) => {
-    if (eventType === "playPause") {
+    if (eventType === "playPause" || eventType === "play" || eventType === "pause") {
+      suppressChromeToggleAt.current = Date.now();
+      if (eventType === "pause") {
+        setPaused(true);
+        reveal();
+      } else if (eventType === "play") {
+        setPaused(false);
+        reveal();
+      } else {
+        togglePause();
+      }
+      return;
+    }
+    // D-pad center / OK: play/pause while watching. Leave select alone in
+    // overlays so subtitle/speed/episode rows and autoplay still activate.
+    if (eventType === "select" || eventType === "ok") {
+      if (menu !== "none" || error || autoplayCountdown != null) {
+        reveal(true);
+        return;
+      }
+      suppressChromeToggleAt.current = Date.now();
       togglePause();
-    } else if (["up", "down", "left", "right", "select"].includes(eventType)) {
+      return;
+    }
+    if (["up", "down", "left", "right"].includes(eventType)) {
       if (!controls && menu === "none") {
         if (eventType === "left") skipBy(-SKIP_S);
         else if (eventType === "right") skipBy(SKIP_S);
@@ -526,8 +568,88 @@ export function PlayerScreen({
     void stopLivePlayback(uuid).catch(() => undefined);
   }, [isLive, params.channelUuid]);
 
+  const clearLiveRecoverTimer = useCallback(() => {
+    if (liveRecoverTimer.current) {
+      clearTimeout(liveRecoverTimer.current);
+      liveRecoverTimer.current = null;
+    }
+  }, []);
+
+  const recoverLive = useCallback(
+    (reason: string) => {
+      if (!isLive || !params.channelUuid || liveRecovering.current) return false;
+      if (liveRecoverAttempts.current >= LIVE_RECOVER_MAX) return false;
+      liveRecovering.current = true;
+      liveRecoverAttempts.current += 1;
+      const attempt = liveRecoverAttempts.current;
+      const delay = Math.min(8_000, 800 * 2 ** Math.min(attempt - 1, 3));
+      clearLiveRecoverTimer();
+      setError(null);
+      setIsBuffering(true);
+      console.info(`[player] live recover ${attempt}/${LIVE_RECOVER_MAX} in ${delay}ms (${reason})`);
+      liveRecoverTimer.current = setTimeout(() => {
+        liveRecoverTimer.current = null;
+        const uuid = params.channelUuid;
+        const list = params.liveChannels ?? [];
+        if (!uuid) {
+          liveRecovering.current = false;
+          return;
+        }
+        void playLiveChannel(uuid, { hls: preferLiveHls })
+          .then((data) => {
+            setLiveRecoveryGen((n) => n + 1);
+            onReplaceParams({
+              source: data.source,
+              title: data.title ?? params.title,
+              live: true,
+              channelUuid: uuid,
+              liveChannels: list,
+            });
+            liveRecovering.current = false;
+          })
+          .catch((err) => {
+            const message =
+              err instanceof Error ? err.message : "Could not reload the live stream";
+            liveRecovering.current = false;
+            if (
+              isNonRecoverableLiveError(message) ||
+              liveRecoverAttempts.current >= LIVE_RECOVER_MAX
+            ) {
+              setError(friendlyPlaybackError(message));
+              setIsBuffering(false);
+              return;
+            }
+            recoverLive(message);
+          });
+      }, delay);
+      return true;
+    },
+    [
+      clearLiveRecoverTimer,
+      isLive,
+      onReplaceParams,
+      params.channelUuid,
+      params.liveChannels,
+      params.title,
+      preferLiveHls,
+    ],
+  );
+
   // Always free the IPTV slot when leaving the player (back, error close, unmount).
-  useEffect(() => () => releaseLive(), [releaseLive]);
+  useEffect(
+    () => () => {
+      clearLiveRecoverTimer();
+      releaseLive();
+    },
+    [clearLiveRecoverTimer, releaseLive],
+  );
+
+  // New channel / zap — reset silent recovery budget.
+  useEffect(() => {
+    liveRecoverAttempts.current = 0;
+    liveRecovering.current = false;
+    clearLiveRecoverTimer();
+  }, [clearLiveRecoverTimer, params.channelUuid]);
 
   useEffect(() => {
     if (!isLive || Platform.OS !== "web") return;
@@ -665,14 +787,19 @@ export function PlayerScreen({
   );
 
   const zap = async (dir: 1 | -1) => {
-    if (!liveZapEnabled || episodeBusyRef.current) return;
-    const list = params.liveChannels ?? [];
-    if (!list.length || !params.channelUuid) return;
-    const idx = list.findIndex((c) => c.uuid === params.channelUuid);
-    const next = list[(idx + dir + list.length) % list.length];
-    if (!next) return;
+    if (!liveZapEnabled || episodeBusyRef.current || !params.channelUuid) return;
     episodeBusyRef.current = true;
     try {
+      let list = params.liveChannels ?? [];
+      // Deep links / reloads open the player without the guide's channel list.
+      if (list.length <= 1) {
+        const fetched = await liveChannels();
+        list = fetched.items.map((c) => ({ uuid: c.uuid, name: c.name, number: c.number }));
+      }
+      if (!list.length) return;
+      const idx = list.findIndex((c) => c.uuid === params.channelUuid);
+      const next = list[(idx + dir + list.length) % list.length];
+      if (!next) return;
       const data = await playLiveChannel(next.uuid, { hls: preferLiveHls });
       onReplaceParams({
         source: data.source,
@@ -897,6 +1024,7 @@ export function PlayerScreen({
     >
       {headers && (Platform.OS === "web" || sessionId || !source.hls) ? (
         <VideoSurface
+          key={isLive ? `live-${params.channelUuid ?? "ch"}-${liveRecoveryGen}` : "vod"}
           source={source}
           uri={uri}
           headers={headers}
@@ -907,10 +1035,21 @@ export function PlayerScreen({
           subtitleTracks={subtitleTracks}
           onProgress={({ currentTime, duration: d, playableDuration }) => {
             // Live HLS often starts near the edge with currentTime already ≫ 0.25.
+            // Live MPEG-TS on Android/TV can keep currentTime at 0 while frames decode —
+            // treat a growing playable window as progress so the overlay can clear.
+            const liveBuffered =
+              isLive &&
+              typeof playableDuration === "number" &&
+              Number.isFinite(playableDuration) &&
+              playableDuration > 0.5;
             const progressed =
-              currentTime > 0.25 || (isLive && currentTime > 0 && !Number.isNaN(currentTime));
+              currentTime > 0.25 ||
+              (isLive && currentTime > 0 && !Number.isNaN(currentTime)) ||
+              liveBuffered;
             if (progressed && !playbackEverProgressed.current) {
               playbackEverProgressed.current = true;
+              // A healthy live join resets the silent-retry budget.
+              if (isLive) liveRecoverAttempts.current = 0;
               const now = typeof performance !== "undefined" ? performance.now() : Date.now();
               trackTelemetry("client.playback_milestone", {
                 milestone: "first_progress",
@@ -953,11 +1092,30 @@ export function PlayerScreen({
             // Only resume once we know duration — seeking with dur=0 EOF-kills iOS HLS.
             applyResumeSeek(dur);
           }}
-          onBuffer={({ isBuffering: waiting, bufferedFraction }) => {
-            // Until the first real progress tick, keep the overlay up. After that,
-            // trust the surface (web already debounces brief HLS segment gaps).
+          onReadyForDisplay={() => {
+            // First frame painted — clear the stuck live overlay even when
+            // ExoPlayer reports currentTime=0 for MPEG-TS.
+            mediaLoaded.current = true;
             if (!playbackEverProgressed.current) {
-              setIsBuffering(true);
+              playbackEverProgressed.current = true;
+              if (isLive) liveRecoverAttempts.current = 0;
+              setIsBuffering(false);
+              reveal();
+            }
+          }}
+          onBuffer={({ isBuffering: waiting, bufferedFraction }) => {
+            // Until the first real progress / frame, keep the overlay up — except
+            // live MPEG-TS, where ExoPlayer can leave the buffering state while
+            // currentTime stays 0 (otherwise the spinner never clears on Android TV).
+            if (!playbackEverProgressed.current) {
+              if (isLive && !waiting) {
+                playbackEverProgressed.current = true;
+                liveRecoverAttempts.current = 0;
+                setIsBuffering(false);
+                reveal();
+              } else {
+                setIsBuffering(true);
+              }
             } else {
               setIsBuffering(waiting);
             }
@@ -989,7 +1147,16 @@ export function PlayerScreen({
               });
               return;
             }
-            if (!isLive && knownDurationRef.current > 0 && positionRef.current < knownDurationRef.current * 0.9) {
+            // Live MPEG-TS / HLS ends when the remux or upstream drops — reload
+            // instead of leaving the player (TV apps do the same).
+            if (isLive) {
+              if (!recoverLive("ended")) {
+                setError("Live stream stopped. Try playing the channel again.");
+                setIsBuffering(false);
+              }
+              return;
+            }
+            if (knownDurationRef.current > 0 && positionRef.current < knownDurationRef.current * 0.9) {
               // Partial IPTV cache: AVPlayer ends when the packaged HLS window
               // ends, which is earlier than the catalogue runtime.
               const partialCache =
@@ -1020,7 +1187,11 @@ export function PlayerScreen({
               setIsBuffering(true);
               return;
             }
-            setError(friendlyPlaybackError(message));
+            const friendly = friendlyPlaybackError(message);
+            if (isLive && !isNonRecoverableLiveError(friendly) && recoverLive(friendly)) {
+              return;
+            }
+            setError(friendly);
           }}
           onSeekRequest={(seek) => {
             seekFn.current = seek;
@@ -1098,7 +1269,7 @@ export function PlayerScreen({
 
           {!isBuffering ? (
             <View style={styles.centerPlay}>
-              <IconButton onPress={togglePause} label={paused ? "Play" : "Pause"} large>
+              <IconButton onPress={togglePauseFromChrome} label={paused ? "Play" : "Pause"} large>
                 <View style={styles.centerPlayHit}>
                   {paused ? <NfPlayIcon size={40} /> : <NfPauseIcon size={40} />}
                 </View>
@@ -1167,7 +1338,7 @@ export function PlayerScreen({
 
             <View style={styles.row}>
               <View style={styles.leftActions}>
-                <IconButton onPress={togglePause} label={paused ? "Play" : "Pause"}>
+                <IconButton onPress={togglePauseFromChrome} label={paused ? "Play" : "Pause"}>
                   {paused ? <NfPlayIcon size={30} /> : <NfPauseIcon size={30} />}
                 </IconButton>
                 {!isLive ? (
@@ -1350,6 +1521,17 @@ export function PlayerScreen({
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
+          {isLive && params.channelUuid && !isNonRecoverableLiveError(error) ? (
+            <Pressable
+              onPress={() => {
+                liveRecoverAttempts.current = 0;
+                if (!recoverLive("manual")) setError(error);
+              }}
+              style={styles.errorCloseBtn}
+            >
+              <Text style={styles.errorClose}>Try again</Text>
+            </Pressable>
+          ) : null}
           <Pressable onPress={handleClose} style={styles.errorCloseBtn}>
             <Text style={styles.errorClose}>Close</Text>
           </Pressable>

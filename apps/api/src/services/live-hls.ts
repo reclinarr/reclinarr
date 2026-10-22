@@ -9,6 +9,11 @@ import {
 import { join } from "node:path";
 import { Readable as NodeReadable } from "node:stream";
 import { formatIptvUpstreamError } from "@reclinarr/shared";
+import {
+  libx264Encoder,
+  selectLiveVideoEncoder,
+  type LiveVideoEncoder,
+} from "./ffmpeg-video-encoder.js";
 import type { IptvConnectionManager, IptvLease } from "./iptv-connection-manager.js";
 
 const READY_TIMEOUT_MS = 35_000;
@@ -19,6 +24,14 @@ const HLS_TIME = 2;
 const HLS_LIST_SIZE = 12;
 /** Don't hand the playlist to clients until we have a real window. */
 const READY_MIN_SEGMENTS = 3;
+/** Cap backoff when ffmpeg / upstream dies while someone is still watching. */
+const RESTART_MAX_DELAY_MS = 15_000;
+
+/** Delay before restarting a dead live remux (exported for unit tests). */
+export function liveHlsRestartDelayMs(attempt: number): number {
+  const n = Math.max(1, Math.floor(attempt));
+  return Math.min(RESTART_MAX_DELAY_MS, 750 * 2 ** Math.min(n - 1, 4));
+}
 
 function ffmpegBin(): string {
   return process.env.FFMPEG_PATH?.trim() || "ffmpeg";
@@ -47,7 +60,11 @@ export function liveHlsReady(dataDir: string, uuid: string): boolean {
 }
 
 /** ffmpeg argv for live MPEG-TS → HLS (exported for unit tests). */
-export function buildLiveHlsFfmpegArgs(dir: string, playlist: string): string[] {
+export function buildLiveHlsFfmpegArgs(
+  dir: string,
+  playlist: string,
+  encoder: LiveVideoEncoder = libx264Encoder(HLS_TIME),
+): string[] {
   return [
     "-hide_banner",
     "-loglevel",
@@ -60,35 +77,14 @@ export function buildLiveHlsFfmpegArgs(dir: string, playlist: string): string[] 
     "2M",
     "-analyzeduration",
     "3M",
+    ...encoder.beforeInput,
     "-i",
     "pipe:0",
     "-map",
     "0:v:0",
     "-map",
     "0:a:0?",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-tune",
-    "zerolatency",
-    "-profile:v",
-    "baseline",
-    "-level",
-    "3.1",
-    "-pix_fmt",
-    "yuv420p",
-    // IDR every HLS_TIME seconds regardless of source fps (fixed -g assumed 25fps).
-    "-force_key_frames",
-    `expr:gte(t,n_forced*${HLS_TIME})`,
-    "-g",
-    "60",
-    "-keyint_min",
-    "48",
-    "-sc_threshold",
-    "0",
-    "-bf",
-    "0",
+    ...encoder.videoArgs,
     // Stretch/squeeze/pad audio so PTS stays locked to video under IPTV jitter.
     "-af",
     "aresample=async=1:first_pts=0",
@@ -147,6 +143,10 @@ export class LiveHlsManager {
   private stopped = false;
   private readonly viewers = new Map<string, string>();
   private readonly pending = new Map<string, Promise<void>>();
+  /** Last opener per channel — used to restart after an unexpected ffmpeg exit. */
+  private readonly openers = new Map<string, OpenLiveStream>();
+  private readonly restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly restartAttempts = new Map<string, number>();
 
   constructor(
     private readonly dataDir: string,
@@ -163,15 +163,19 @@ export class LiveHlsManager {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    for (const uuid of [...this.restartTimers.keys()]) this.clearRestart(uuid);
     this.stopAll();
   }
 
   /** Drop every remux session so VOD/acquisition can take the IPTV slot. */
   stopAll(): void {
-    for (const uuid of [...this.sessions.keys()]) this.stopSession(uuid);
+    for (const uuid of [...this.sessions.keys()]) this.stopChannel(uuid);
   }
 
   stopChannel(uuid: string): void {
+    this.clearRestart(uuid);
+    this.openers.delete(uuid);
+    this.restartAttempts.delete(uuid);
     this.stopSession(uuid);
   }
 
@@ -183,11 +187,19 @@ export class LiveHlsManager {
     return this.viewers.get(owner) === uuid;
   }
 
+  /** True when any client still has this channel selected. */
+  channelHasViewers(uuid: string): boolean {
+    for (const current of this.viewers.values()) {
+      if (current === uuid) return true;
+    }
+    return false;
+  }
+
   releaseViewer(owner: string, uuid?: string): string | undefined {
     const current = this.viewers.get(owner);
     if (!current || (uuid && uuid !== current)) return undefined;
     this.viewers.delete(owner);
-    return [...this.viewers.values()].includes(current) ? undefined : current;
+    return this.channelHasViewers(current) ? undefined : current;
   }
 
   touch(uuid: string): void {
@@ -212,6 +224,8 @@ export class LiveHlsManager {
   async ensureReady(uuid: string, openLiveStream: OpenLiveStream): Promise<void> {
     if (this.stopped) throw new Error("Live HLS manager stopped");
     this.start();
+    this.openers.set(uuid, openLiveStream);
+    this.clearRestart(uuid);
     this.touch(uuid);
     const existing = this.pending.get(uuid);
     if (existing) return existing;
@@ -219,6 +233,7 @@ export class LiveHlsManager {
       if (!this.sessions.has(uuid)) await this.startSession(uuid, openLiveStream);
       if (!liveHlsReady(this.dataDir, uuid)) await this.waitReady(uuid);
       this.touch(uuid);
+      this.restartAttempts.delete(uuid);
     })();
     this.pending.set(uuid, ready);
     try {
@@ -234,6 +249,7 @@ export class LiveHlsManager {
   private async startSession(uuid: string, openLiveStream: OpenLiveStream): Promise<void> {
     // Retune: kill previous remux for this (or any) channel if we're replacing.
     this.stopSession(uuid);
+    this.openers.set(uuid, openLiveStream);
 
     const dir = liveHlsDir(this.dataDir, uuid);
     rmSync(dir, { recursive: true, force: true });
@@ -269,7 +285,9 @@ export class LiveHlsManager {
     // some channels but AVPlayer still fails with "The resource is unavailable"
     // on live IPTV TS. aresample=async keeps A/V locked when upstream PCR/PTS
     // jitter would otherwise drift audio vs video across segment boundaries.
-    const args = buildLiveHlsFfmpegArgs(dir, playlist);
+    // GPU encode is used when a probe frame succeeds; otherwise libx264.
+    const encoder = await selectLiveVideoEncoder({ hlsTime: HLS_TIME, bin: ffmpegBin() });
+    const args = buildLiveHlsFfmpegArgs(dir, playlist, encoder);
 
     const proc = spawn(ffmpegBin(), args, { stdio: ["pipe", "ignore", "pipe"] });
     const session: Session = {
@@ -290,7 +308,10 @@ export class LiveHlsManager {
 
     proc.on("error", (err) => {
       console.error(`[live-hls] ${uuid} ffmpeg spawn failed`, err);
-      this.stopSession(uuid);
+      if (this.sessions.get(uuid)?.proc === proc) {
+        this.stopSession(uuid);
+        this.scheduleRestart(uuid);
+      }
     });
 
     proc.on("close", (code) => {
@@ -299,8 +320,11 @@ export class LiveHlsManager {
           console.error(
             `[live-hls] ${uuid} ffmpeg exit ${code}: ${session.stderr.trim() || "unknown"}`,
           );
+        } else {
+          console.info(`[live-hls] ${uuid} ffmpeg exited`);
         }
         this.stopSession(uuid);
+        this.scheduleRestart(uuid);
       }
     });
 
@@ -328,7 +352,11 @@ export class LiveHlsManager {
     lease.signal.addEventListener(
       "abort",
       () => {
-        this.stopSession(uuid);
+        if (this.sessions.get(uuid)?.proc === proc) {
+          this.stopSession(uuid);
+          // Preempted IPTV slot or cancelled upstream — rejoin if someone is still tuned.
+          this.scheduleRestart(uuid);
+        }
       },
       { once: true },
     );
@@ -377,12 +405,57 @@ export class LiveHlsManager {
     rmSync(session.dir, { recursive: true, force: true });
   }
 
+  private clearRestart(uuid: string): void {
+    const timer = this.restartTimers.get(uuid);
+    if (timer) {
+      clearTimeout(timer);
+      this.restartTimers.delete(uuid);
+    }
+  }
+
+  /**
+   * When ffmpeg / upstream dies mid-watch, bring the remux back so playlist polls
+   * and the player can rejoin without the user leaving the player.
+   */
+  private scheduleRestart(uuid: string): void {
+    if (this.stopped || !this.channelHasViewers(uuid)) return;
+    if (this.sessions.has(uuid) || this.pending.has(uuid) || this.restartTimers.has(uuid)) return;
+    const opener = this.openers.get(uuid);
+    if (!opener) return;
+
+    const attempt = (this.restartAttempts.get(uuid) ?? 0) + 1;
+    this.restartAttempts.set(uuid, attempt);
+    const delay = liveHlsRestartDelayMs(attempt);
+    console.info(`[live-hls] ${uuid} restarting in ${delay}ms (attempt ${attempt})`);
+    const timer = setTimeout(() => {
+      this.restartTimers.delete(uuid);
+      if (this.stopped || !this.channelHasViewers(uuid)) return;
+      if (this.sessions.has(uuid) || this.pending.has(uuid)) return;
+      const open = this.openers.get(uuid);
+      if (!open) return;
+      void this.ensureReady(uuid, open).catch((err) => {
+        console.error(
+          `[live-hls] ${uuid} restart failed:`,
+          err instanceof Error ? err.message : err,
+        );
+        this.scheduleRestart(uuid);
+      });
+    }, delay);
+    timer.unref?.();
+    this.restartTimers.set(uuid, timer);
+  }
+
   private reapIdle(): void {
     const now = Date.now();
     for (const [uuid, session] of this.sessions) {
       if (now - session.lastAccess > IDLE_MS) {
         console.info(`[live-hls] reaping idle session ${uuid}`);
-        this.stopSession(uuid);
+        // Drop abandoned viewer rows (crashed tab / missed stop) so we do not
+        // keep auto-restarting a channel nobody is polling anymore.
+        for (const [owner, channel] of [...this.viewers.entries()]) {
+          if (channel === uuid) this.viewers.delete(owner);
+        }
+        this.stopChannel(uuid);
       }
     }
   }

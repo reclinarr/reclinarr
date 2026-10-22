@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import {
   Animated,
   Platform,
@@ -19,7 +19,7 @@ import {
   toggleMyList,
 } from "@reclinarr/client";
 import { Artwork } from "./Artwork.js";
-import { isTvFocused } from "./focus.js";
+import { isTvFocused, useTvFocusAllowed } from "./focus.js";
 import { ChevronDownIcon, DownloadIcon, PlayIcon } from "./icons.js";
 import type { NativeLayout } from "./layout.js";
 import { colors } from "./theme.js";
@@ -84,6 +84,11 @@ export type PosterCardProps = {
   /** Play from the hover panel. Series still open details. */
   onPlay?: () => void;
   onFocusCard?: () => void;
+  onBlurCard?: () => void;
+  /** Host view of the focusable surface (TV focus restore). */
+  focusRef?: Ref<View>;
+  /** Draw as focused: native focus was restored without a focus event. */
+  forceFocused?: boolean;
   /**
    * Rail-controlled expand. When set, this card is enlarged only while true —
    * the parent owns exclusive hover so moving onto a neighbor closes this one.
@@ -110,6 +115,9 @@ export function PosterCard({
   onPress,
   onPlay,
   onFocusCard,
+  onBlurCard,
+  focusRef,
+  forceFocused,
   expanded,
   onHoverChange,
   hasTVPreferredFocus,
@@ -118,10 +126,15 @@ export function PosterCard({
   variant = "caption",
   rank,
 }: PosterCardProps) {
+  const focusAllowed = useTvFocusAllowed();
+  const preferFocus = focusAllowed ? hasTVPreferredFocus : undefined;
   const backdrop = media.metadata.backdropUrl;
   const poster = media.metadata.posterUrl;
   const [source, setSource] = useState<"wide" | "poster" | "none">("wide");
   const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (forceFocused) setFocused(true);
+  }, [forceFocused]);
   const [localHover, setLocalHover] = useState(false);
   const art = source === "none" ? undefined : source === "poster" ? poster : backdrop || poster;
   const corner = cornerKind(media);
@@ -297,13 +310,18 @@ export function PosterCard({
           }}
         >
           <Pressable
+            ref={focusRef}
             onPress={onPress}
-            hasTVPreferredFocus={hasTVPreferredFocus}
+            focusable={focusAllowed}
+            hasTVPreferredFocus={preferFocus}
             onFocus={() => {
               setFocused(true);
               onFocusCard?.();
             }}
-            onBlur={() => setFocused(false)}
+            onBlur={() => {
+              setFocused(false);
+              onBlurCard?.();
+            }}
             style={{
               width: w,
               height: h,
@@ -471,13 +489,18 @@ export function PosterCard({
   return (
     <View style={{ width: w, marginRight: layout.cardGap, zIndex: focused ? 3 : 0 }}>
       <Pressable
+        ref={focusRef}
         onPress={onPress}
-        hasTVPreferredFocus={hasTVPreferredFocus}
+        focusable={focusAllowed}
+        hasTVPreferredFocus={preferFocus}
         onFocus={() => {
           setFocused(true);
           onFocusCard?.();
         }}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          onBlurCard?.();
+        }}
         style={({ pressed }) => [
           {
             width: w,

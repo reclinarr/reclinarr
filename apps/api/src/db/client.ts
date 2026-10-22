@@ -6,7 +6,7 @@ import * as schema from "./schema.js";
 
 export function createDb(dataDir: string) {
   mkdirSync(dataDir, { recursive: true });
-  const dbPath = join(dataDir, "streamerr.sqlite");
+  const dbPath = join(dataDir, "reclinarr.sqlite");
   mkdirSync(dirname(dbPath), { recursive: true });
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");
@@ -68,6 +68,7 @@ export function createDb(dataDir: string) {
       stream_id TEXT,
       title TEXT,
       catalogue_language TEXT,
+      language_confidence TEXT,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (tmdb_id, media_type)
     );
@@ -85,6 +86,11 @@ export function createDb(dataDir: string) {
   }
   try {
     sqlite.exec(`ALTER TABLE dispatcharr_tmdb_index ADD COLUMN catalogue_language TEXT`);
+  } catch {
+    /* already exists */
+  }
+  try {
+    sqlite.exec(`ALTER TABLE dispatcharr_tmdb_index ADD COLUMN language_confidence TEXT`);
   } catch {
     /* already exists */
   }

@@ -14,9 +14,9 @@ loadEnv({ path: resolve(process.cwd(), ".env") });
 
 async function main() {
   // Environment variables always win over values entered in the setup wizard.
-  const dataDir = process.env.RECLINARR_DATA_DIR ?? process.env.STREAMERR_DATA_DIR ?? "./data";
+  const dataDir = process.env.RECLINARR_DATA_DIR ?? "./data";
   const stored = readSetupConfig(dataDir);
-  if (!process.env.RECLINARR_SESSION_SECRET && !process.env.STREAMERR_SESSION_SECRET && !stored.RECLINARR_SESSION_SECRET) {
+  if (!process.env.RECLINARR_SESSION_SECRET && !stored.RECLINARR_SESSION_SECRET) {
     stored.RECLINARR_SESSION_SECRET = randomBytes(32).toString("hex");
     writeSetupConfig(dataDir, stored);
   }

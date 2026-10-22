@@ -63,6 +63,8 @@ export interface PackagerJobSource {
 export class HlsPackager {
   private readonly busy = new Set<string>();
   private readonly lastPackSize = new Map<string, number>();
+  /** File size at the last failed pack — e.g. MP4 with moov at the end stays unparseable until complete. */
+  private readonly failedAtSize = new Map<string, number>();
   private readonly copyAudio = new Map<string, boolean>();
   private timer?: ReturnType<typeof setInterval>;
   private stopped = false;
@@ -108,6 +110,13 @@ export class HlsPackager {
       })();
       if (size < MIN_BYTES_BEFORE_PACK && !job.downloadComplete) continue;
 
+      const failedAt = this.failedAtSize.get(job.id);
+      if (failedAt != null) {
+        const retry =
+          size >= failedAt + MIN_REPACK_GROWTH_BYTES || (job.downloadComplete && size !== failedAt);
+        if (!retry) continue;
+      }
+
       const lastSize = this.lastPackSize.get(job.id) ?? 0;
       const grew = size > lastSize + MIN_REPACK_GROWTH_BYTES;
       const ready = hlsPlaybackReady(this.dataDir, job.id);
@@ -124,10 +133,12 @@ export class HlsPackager {
       try {
         await this.packFromStart(job);
         this.lastPackSize.set(job.id, size);
+        this.failedAtSize.delete(job.id);
         if (hlsPlaybackReady(this.dataDir, job.id)) {
           this.source.markHlsReady?.(job.id);
         }
       } catch (err) {
+        this.failedAtSize.set(job.id, size);
         console.error(`[packager] ${job.id} failed`, err);
       } finally {
         this.busy.delete(job.id);

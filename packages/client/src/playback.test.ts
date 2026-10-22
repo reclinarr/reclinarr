@@ -64,8 +64,8 @@ describe("sessionCookieHeader", () => {
     });
     try {
       expect(sessionCookieHeader("abc")).toEqual({
-        Cookie: "streamerr_session=abc",
-        "x-streamerr-session": "abc",
+        Cookie: "reclinarr_session=abc",
+        "x-reclinarr-session": "abc",
       });
       expect(sessionCookieHeader(null)).toEqual({});
     } finally {
@@ -81,7 +81,7 @@ describe("sessionCookieHeader", () => {
     });
     try {
       expect(sessionCookieHeader("abc")).toEqual({
-        "x-streamerr-session": "abc",
+        "x-reclinarr-session": "abc",
       });
     } finally {
       Object.defineProperty(globalThis, "navigator", { value: prev, configurable: true });

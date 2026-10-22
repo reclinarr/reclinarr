@@ -63,6 +63,14 @@ export async function registerPlaybackRoutes(
       err.statusCode = 404;
       throw err;
     }
+    const played =
+      result.status === "ready" ? result.source.resolvedIdentity ?? body.identity : body.identity;
+    try {
+      const freed = ctx.cacheManager.evictWatchedBefore(played);
+      if (freed > 0) req.log.info({ freed }, "freed watched episodes from cache");
+    } catch (err) {
+      req.log.warn({ err }, "watched-episode cache cleanup failed");
+    }
     return result;
   });
 

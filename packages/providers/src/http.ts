@@ -62,8 +62,10 @@ export class HttpClient {
       schema?: ZodType<T>;
       allowStatuses?: number[];
       rawBody?: boolean;
+      timeoutMs?: number;
     },
   ): Promise<{ status: number; data: T; headers: Headers }> {
+    const timeoutMs = opts?.timeoutMs ?? this.timeoutMs;
     const url = new URL(this.baseUrl + (path.startsWith("/") ? path : `/${path}`));
     if (opts?.query) {
       // Use encodeURIComponent (%20) — not URLSearchParams (+).
@@ -77,7 +79,7 @@ export class HttpClient {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const started = typeof performance !== "undefined" ? performance.now() : Date.now();
     let outcome: "success" | "failure" = "failure";
     let status: number | undefined;
@@ -140,7 +142,7 @@ export class HttpClient {
     } catch (err) {
       if (err instanceof ProviderError) throw err;
       if (err instanceof Error && err.name === "AbortError") {
-        throw new ProviderError(`${this.serviceName} timeout after ${this.timeoutMs}ms`, {
+        throw new ProviderError(`${this.serviceName} timeout after ${timeoutMs}ms`, {
           code: "timeout",
           provider: this.serviceName,
           cause: err,

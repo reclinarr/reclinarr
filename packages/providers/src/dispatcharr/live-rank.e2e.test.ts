@@ -32,7 +32,7 @@ loadRootEnv();
 
 const baseUrl = process.env.DISPATCHARR_URL?.trim();
 const apiKey = process.env.DISPATCHARR_API_KEY?.trim();
-const live = (process.env.RECLINARR_LIVE_TESTS ?? process.env.STREAMERR_LIVE_TESTS) === "true" && Boolean(baseUrl && apiKey);
+const live = process.env.RECLINARR_LIVE_TESTS === "true" && Boolean(baseUrl && apiKey);
 
 describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
   const provider = new DispatcharrProvider({
@@ -79,11 +79,10 @@ describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
 
     expect(top.catalogueLanguage).toBe("en");
     expect(top.label?.toUpperCase().startsWith("EN")).toBe(true);
-    // Non-EN streams must not sit above EN
-    const firstNonEn = da!.candidates.findIndex((c) => c.catalogueLanguage && c.catalogueLanguage !== "en");
-    if (firstNonEn > 0) {
-      expect(firstNonEn).toBeGreaterThan(0);
-    }
+    expect(da?.languageConfidence).toBe("confirmed");
+    expect(da!.candidates.every((c) => !c.catalogueLanguage || c.catalogueLanguage === "en")).toBe(
+      true,
+    );
   }, 60_000);
 
   it("4K-EN title (Books of Blood): catalogue + streams prefer EN, 4K ranks above plain EN", async () => {

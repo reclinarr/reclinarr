@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { AcquisitionModeSchema, MediaIdentitySchema } from "@reclinarr/shared";
+import {
+  AcquisitionModeSchema,
+  MediaIdentitySchema,
+  tmdbLanguageReference,
+} from "@reclinarr/shared";
 import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
 
@@ -59,8 +63,15 @@ export async function registerAcquisitionRoutes(
             ? "tv"
             : "movie";
       if (kind) {
+        const details = ctx.seerr.getDetails
+          ? await ctx.seerr.getDetails(kind, body.identity.tmdbId).catch(() => null)
+          : null;
         const media = await ctx.dispatcharr
-          .findVodByTmdb(body.identity.tmdbId, kind)
+          .findVodByTmdb(body.identity.tmdbId, kind, {
+            titleHint: details?.metadata.title,
+            yearHint: details?.metadata.year,
+            reference: tmdbLanguageReference(details?.metadata),
+          })
           .catch(() => null);
         const avail = media?.availability.find((a) => a.provider === "dispatcharr");
         if (avail?.uuid) {
@@ -76,11 +87,14 @@ export async function registerAcquisitionRoutes(
       }
     }
 
-    const item = await ctx.acquisitions.start({
-      identity: body.identity,
-      mode: body.mode,
-      source,
-    });
+    const item = await ctx.acquisitions.start(
+      {
+        identity: body.identity,
+        mode: body.mode,
+        source,
+      },
+      { queued: true },
+    );
     return { item: publicAcquisition(item) };
   });
 

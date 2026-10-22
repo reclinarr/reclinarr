@@ -27,6 +27,10 @@ export {
   tvFocusFill,
   tvFocusRingOnLight,
   tvFocusHighlight,
+  TvFocusLockProvider,
+  TvInitialFocusSuppressProvider,
+  useTvFocusAllowed,
+  usePreferredFocusOnce,
   type TvPressState,
 } from "./focus.js";
 export {

@@ -18,7 +18,7 @@ export function BrandLogo({
 }) {
   return (
     <View accessible accessibilityRole="image" accessibilityLabel="Reclinarr" style={[styles.logo, style]}>
-      <Svg width={size} height={size} viewBox="16 16 68 68" accessible={false}>
+      <Svg width={size} height={size} viewBox="16 16 68 68">
         <Path d={MARK} fill={colors.accent} fillRule="evenodd" />
       </Svg>
       {markOnly ? null : (

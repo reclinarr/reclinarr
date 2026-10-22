@@ -130,6 +130,7 @@ export function createAppContext(config: AppConfig): AppContext {
   const cacheManager = new CacheManager(db, {
     maxBytes: config.RECLINARR_CACHE_MAX_BYTES,
     ttlMs: config.RECLINARR_CACHE_TTL_MS,
+    watchedTtlMs: config.RECLINARR_CACHE_WATCHED_TTL_MS,
     // Protect recently played cache files for long watches (default was 5 minutes).
     protectMs: 3 * 60 * 60_000,
     dataDir: config.RECLINARR_DATA_DIR,

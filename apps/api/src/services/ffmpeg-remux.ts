@@ -161,6 +161,8 @@ function buildUrlArgs(
 export interface AudioProbeResult {
   codec: string | null;
   formatName: string | null;
+  /** Container runtime — MKV / fast-start MP4 headers carry it even in a partial file. */
+  durationSeconds?: number | null;
 }
 
 /**
@@ -188,7 +190,7 @@ export function probeAudioStream(opts: {
       "-select_streams",
       "a:0",
       "-show_entries",
-      "stream=codec_name:format=format_name",
+      "stream=codec_name:format=format_name,duration",
       "-of",
       "json",
     ];
@@ -250,11 +252,16 @@ export function probeAudioStream(opts: {
       try {
         const parsed = JSON.parse(stdout) as {
           streams?: Array<{ codec_name?: string }>;
-          format?: { format_name?: string };
+          format?: { format_name?: string; duration?: string };
         };
         const codec = parsed.streams?.[0]?.codec_name?.trim() || null;
         const formatName = parsed.format?.format_name?.trim() || null;
-        finish({ codec, formatName });
+        const duration = Number(parsed.format?.duration);
+        finish({
+          codec,
+          formatName,
+          durationSeconds: Number.isFinite(duration) && duration > 0 ? duration : null,
+        });
       } catch {
         finish({ codec: null, formatName: null });
       }
@@ -434,7 +441,7 @@ export function webStreamToNode(stream: ReadableStream<Uint8Array>): Readable {
   return NodeReadable.fromWeb(stream as import("node:stream/web").ReadableStream);
 }
 
-/** Header value for X-Streamerr-Remux. */
+/** Header value for X-Reclinarr-Remux. */
 export function remuxModeHeader(copyAudio: boolean): string {
   return copyAudio ? "copy-mp4" : "aac-mp4";
 }

@@ -9,7 +9,7 @@ export function HomeScreen({ username }: { username: string }) {
   const nav = useScreenNav();
   const [scrolled, setScrolled] = useState(false);
   return (
-    <Chrome username={username} overlay scrolled={scrolled}>
+    <Chrome username={username} overlay scrolled={scrolled} contentFocus>
       <SharedHome
         layout={layout}
         nav={nav}

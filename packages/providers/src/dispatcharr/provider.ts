@@ -8,8 +8,12 @@ import type {
   MediaIdentity,
   PlaybackSource,
   ProviderHealth,
+  CatalogueLanguageScored,
+  PlayableLanguageConfidence,
+  TmdbLanguageReference,
 } from "@reclinarr/shared";
 import {
+  isPlayableLanguageConfidence,
   parseCatalogueLanguageHints,
   parsePreferredLanguages,
   parseQualityHints,
@@ -18,7 +22,12 @@ import {
   rankDispatcharrStreamCandidates,
 } from "@reclinarr/shared";
 import { HttpClient } from "../http.js";
-import type { AcquisitionSourceProvider, LiveTvProvider, VodProvider } from "../types.js";
+import type {
+  AcquisitionSourceProvider,
+  LiveTvProvider,
+  VodLookupOptions,
+  VodProvider,
+} from "../types.js";
 import { DISPATCHARR_CAPABILITIES } from "../types.js";
 import {
   authHeaders,
@@ -64,6 +73,13 @@ export interface DispatcharrProviderOptions {
    * Used to rank EN-/IT- prefixed VOD rows that share a TMDb id.
    */
   preferredLanguages?: string[];
+}
+
+function referenceCacheKey(reference?: TmdbLanguageReference): string {
+  if (!reference) return "noref";
+  return [reference.originalLanguage, reference.title, reference.originalTitle]
+    .map((v) => v ?? "")
+    .join("|");
 }
 
 const TokenSchema = z.object({
@@ -275,20 +291,21 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     }
   }
 
+  /**
+   * Find the on-demand copy of a TMDb title in a preferred language.
+   * Untagged copies only count when `reference` (TMDb title + original language)
+   * vouches for them; without a reference they are never offered.
+   */
   async findVodByTmdb(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    opts?: {
-      titleHint?: string;
-      yearHint?: number;
-      dispatcharrId?: number;
-      preferredLanguages?: string[];
-    },
+    opts?: VodLookupOptions,
   ): Promise<Media | null> {
     const languages = opts?.preferredLanguages?.length
       ? opts.preferredLanguages
       : this.preferredLanguages;
-    const cacheKey = `${mediaType}:${tmdbId}:${languages.join(",")}`;
+    const reference = opts?.reference;
+    const cacheKey = `${mediaType}:${tmdbId}:${languages.join(",")}:${referenceCacheKey(reference)}`;
     const cached = this.tmdbCache.get(cacheKey);
     if (cached && Date.now() - cached.at < DispatcharrProvider.TMDB_CACHE_TTL_MS) {
       return cached.media;
@@ -296,26 +313,18 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
 
     try {
       const media = await this.withAuthRetry(async () => {
-        let hit: Media | null = null;
-        // Fast path: known Dispatcharr row id (SQLite index) — skip catalogue search.
+        // Fast path: known Dispatcharr row id (SQLite index) — skip catalogue search,
+        // but only when the row still passes the language check.
         if (opts?.dispatcharrId != null) {
-          hit =
+          const hit =
             mediaType === "movie"
-              ? await this.getMovieById(opts.dispatcharrId)
-              : await this.getSeriesById(opts.dispatcharrId);
-          const gotTmdb = hit?.identity.tmdbId;
-          if (hit && gotTmdb != null && gotTmdb !== tmdbId) {
-            // Stale index entry — fall through to search.
-            hit = null;
-          }
+              ? await this.movieFromKnownId(opts.dispatcharrId, tmdbId, languages, reference)
+              : await this.seriesFromKnownId(opts.dispatcharrId, tmdbId, languages, reference);
+          if (hit) return hit;
         }
-        if (!hit) {
-          hit =
-            mediaType === "movie"
-              ? await this.findMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages)
-              : await this.findSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages);
-        }
-        return hit;
+        return mediaType === "movie"
+          ? await this.findMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages, reference)
+          : await this.findSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages, reference);
       });
       this.tmdbCache.set(cacheKey, { at: Date.now(), media });
       return media;
@@ -327,7 +336,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   }
 
   /** Direct movie fetch by Dispatcharr id (avoids 70k catalogue search). */
-  async getMovieById(id: number): Promise<Media | null> {
+  private async fetchMovieRow(id: number): Promise<DispatcharrMovie | null> {
     const http = await this.http();
     try {
       const { status, data } = await http.request<unknown>("GET", `/api/vod/movies/${id}/`, {
@@ -335,14 +344,13 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       });
       if (status === 404) return null;
       const parsed = DispatcharrMovieSchema.safeParse(data);
-      if (!parsed.success) return null;
-      return this.enrichMovie(parsed.data);
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
   }
 
-  async getSeriesById(id: number): Promise<Media | null> {
+  private async fetchSeriesRow(id: number): Promise<DispatcharrSeries | null> {
     const http = await this.http();
     try {
       const { status, data } = await http.request<unknown>("GET", `/api/vod/series/${id}/`, {
@@ -350,11 +358,48 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       });
       if (status === 404) return null;
       const parsed = DispatcharrSeriesSchema.safeParse(data);
-      if (!parsed.success) return null;
-      return mapSeriesToMedia(parsed.data);
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
+  }
+
+  /** Known-id fast path; null when stale (other TMDb id) or not trustworthy in language. */
+  private async movieFromKnownId(
+    id: number,
+    tmdbId: number,
+    languages: string[],
+    reference?: TmdbLanguageReference,
+  ): Promise<Media | null> {
+    const row = await this.fetchMovieRow(id);
+    if (!row || !tmdbMatches(row.tmdb_id, tmdbId)) return null;
+    const best = pickPreferredByCatalogueLanguage([row], languages, {
+      nameOf: (m) => m.name,
+      idOf: (m) => m.id,
+      reference,
+    });
+    if (!best) return null;
+    return this.enrichMovie(best.item, best.catalogueLanguage, best.confidence, languages);
+  }
+
+  private async seriesFromKnownId(
+    id: number,
+    tmdbId: number,
+    languages: string[],
+    reference?: TmdbLanguageReference,
+  ): Promise<Media | null> {
+    const row = await this.fetchSeriesRow(id);
+    if (!row || !tmdbMatches(row.tmdb_id, tmdbId)) return null;
+    const best = pickPreferredByCatalogueLanguage([row], languages, {
+      nameOf: (s) => s.name,
+      idOf: (s) => s.id,
+      reference,
+    });
+    if (!best) return null;
+    return mapSeriesToMedia(best.item, {
+      catalogueLanguage: best.catalogueLanguage,
+      languageConfidence: best.confidence,
+    });
   }
 
   async resolveVodPlayback(identity: MediaIdentity): Promise<PlaybackSource | null> {
@@ -452,7 +497,8 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       const { status, data } = await http.request<unknown>(
         "GET",
         `/api/vod/series/${seriesId}/provider-info/`,
-        { allowStatuses: [200, 404] },
+        // Cold calls make Dispatcharr fetch the whole episode tree upstream first.
+        { allowStatuses: [200, 404], timeoutMs: Math.max(this.timeoutMs, 60_000) },
       );
       if (status === 404) return [];
       const parsed = z
@@ -489,13 +535,18 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     seriesTmdbId: number,
     seasonNumber: number,
     episodeNumber: number,
-    opts?: { titleHint?: string; preferredLanguages?: string[] },
+    opts?: {
+      titleHint?: string;
+      preferredLanguages?: string[];
+      reference?: TmdbLanguageReference;
+    },
   ): Promise<Media | null> {
     const series = await this.findVodByTmdb(seriesTmdbId, "tv", {
       titleHint: opts?.titleHint,
       ...(opts?.preferredLanguages?.length
         ? { preferredLanguages: opts.preferredLanguages }
         : {}),
+      ...(opts?.reference ? { reference: opts.reference } : {}),
     });
     const seriesId = series?.availability.find((a) => a.provider === "dispatcharr")?.seriesId;
     if (!seriesId) return null;
@@ -596,32 +647,39 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   async findVodCatalogueMatch(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    opts?: { titleHint?: string; yearHint?: number },
+    opts?: { titleHint?: string; yearHint?: number; reference?: TmdbLanguageReference },
   ): Promise<{
     id: number;
     uuid: string;
     name: string;
     catalogueLanguage?: string;
+    languageConfidence: PlayableLanguageConfidence;
   } | null> {
     try {
       return await this.withAuthRetry(async () => {
-        if (mediaType === "movie") {
-          const best = await this.matchMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint);
-          if (!best) return null;
-          return {
-            id: best.item.id,
-            uuid: best.item.uuid,
-            name: best.item.name,
-            catalogueLanguage: best.catalogueLanguage,
-          };
-        }
-        const best = await this.matchSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint);
+        const best =
+          mediaType === "movie"
+            ? await this.matchMovieByTmdb(
+                tmdbId,
+                opts?.titleHint,
+                opts?.yearHint,
+                this.preferredLanguages,
+                opts?.reference,
+              )
+            : await this.matchSeriesByTmdb(
+                tmdbId,
+                opts?.titleHint,
+                opts?.yearHint,
+                this.preferredLanguages,
+                opts?.reference,
+              );
         if (!best) return null;
         return {
           id: best.item.id,
           uuid: best.item.uuid,
           name: best.item.name,
           catalogueLanguage: best.catalogueLanguage,
+          languageConfidence: best.confidence,
         };
       });
     } catch (err) {
@@ -635,10 +693,11 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     titleHint?: string,
     yearHint?: number,
     languages: string[] = this.preferredLanguages,
+    reference?: TmdbLanguageReference,
   ): Promise<Media | null> {
-    const best = await this.matchMovieByTmdb(tmdbId, titleHint, yearHint, languages);
+    const best = await this.matchMovieByTmdb(tmdbId, titleHint, yearHint, languages, reference);
     if (!best) return null;
-    return this.enrichMovie(best.item, best.catalogueLanguage);
+    return this.enrichMovie(best.item, best.catalogueLanguage, best.confidence, languages);
   }
 
   private async matchMovieByTmdb(
@@ -646,7 +705,8 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     titleHint?: string,
     yearHint?: number,
     languages: string[] = this.preferredLanguages,
-  ): Promise<{ item: DispatcharrMovie; catalogueLanguage?: string } | null> {
+    reference?: TmdbLanguageReference,
+  ): Promise<CatalogueLanguageScored<DispatcharrMovie> | null> {
     const http = await this.http();
     // Upstream has no tmdb_id filter — search (+ year when known) then match.
     const queries = this.searchQueries(titleHint, tmdbId);
@@ -667,6 +727,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     return pickPreferredByCatalogueLanguage([...seen.values()], languages, {
       nameOf: (m) => m.name,
       idOf: (m) => m.id,
+      reference,
     });
   }
 
@@ -694,10 +755,14 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     titleHint?: string,
     yearHint?: number,
     languages: string[] = this.preferredLanguages,
+    reference?: TmdbLanguageReference,
   ): Promise<Media | null> {
-    const best = await this.matchSeriesByTmdb(tmdbId, titleHint, yearHint, languages);
+    const best = await this.matchSeriesByTmdb(tmdbId, titleHint, yearHint, languages, reference);
     if (!best) return null;
-    return mapSeriesToMedia(best.item, { catalogueLanguage: best.catalogueLanguage });
+    return mapSeriesToMedia(best.item, {
+      catalogueLanguage: best.catalogueLanguage,
+      languageConfidence: best.confidence,
+    });
   }
 
   private async matchSeriesByTmdb(
@@ -705,7 +770,8 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     titleHint?: string,
     yearHint?: number,
     languages: string[] = this.preferredLanguages,
-  ): Promise<{ item: DispatcharrSeries; catalogueLanguage?: string } | null> {
+    reference?: TmdbLanguageReference,
+  ): Promise<CatalogueLanguageScored<DispatcharrSeries> | null> {
     const http = await this.http();
     const queries = this.searchQueries(titleHint, tmdbId);
     const seen = new Map<number, DispatcharrSeries>();
@@ -724,6 +790,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     return pickPreferredByCatalogueLanguage([...seen.values()], languages, {
       nameOf: (s) => s.name,
       idOf: (s) => s.id,
+      reference,
     });
   }
 
@@ -765,10 +832,16 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     return [...out];
   }
 
+  /**
+   * Attach ranked stream candidates. Null when the movie has streams but none
+   * survive the language filter (e.g. only wrong-language copies).
+   */
   private async enrichMovie(
     movie: DispatcharrMovie,
-    catalogueLanguage?: string,
-  ): Promise<Media> {
+    catalogueLanguage: string | undefined,
+    languageConfidence: PlayableLanguageConfidence,
+    languages: string[],
+  ): Promise<Media | null> {
     const http = await this.http();
     let candidates: DispatcharrStreamCandidate[] = [];
     // List endpoint usually leaves duration_secs null — provider payloads carry it.
@@ -790,32 +863,30 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       if (providersParsed.success && providersParsed.data.length > 0) {
         const providers = providersParsed.data;
         const titleHints = parseCatalogueLanguageHints({ name: movie.name });
-        candidates = this.rankStreamCandidates(
-          providers.map((p) => {
-            const categoryName = p.category?.name;
-            const basicName = p.custom_properties?.basic_data?.name;
-            // Language lives on category / XC title — never m3u account ("Strong 8K").
-            const hints = parseCatalogueLanguageHints({
-              name: categoryName ?? basicName,
-              group: basicName ?? movie.name,
-            });
-            const qualityLabel = p.quality_info?.quality ?? p.quality_info?.resolution ?? undefined;
-            const fromQi = parseQualityHints(qualityLabel);
-            const fromLabel = parseQualityHints([categoryName, basicName, movie.name].filter(Boolean).join(" "));
-            const resolutionHeight =
-              fromQi.height ?? hints.qualityHeight ?? fromLabel.height ?? titleHints.qualityHeight;
-            const hdr = Boolean(fromQi.hdr ?? hints.hdr ?? fromLabel.hdr ?? titleHints.hdr);
-            return {
-              streamId: p.stream_id ?? undefined,
-              m3uAccountId: p.m3u_account?.id,
-              label: categoryName ?? basicName ?? qualityLabel,
-              catalogueLanguage: hints.language,
-              qualityLabel,
-              resolutionHeight,
-              hdr: hdr || undefined,
-            };
-          }),
-        );
+        candidates = providers.map((p) => {
+          const categoryName = p.category?.name;
+          const basicName = p.custom_properties?.basic_data?.name;
+          // Language lives on category / XC title — never m3u account ("Strong 8K").
+          const hints = parseCatalogueLanguageHints({
+            name: categoryName ?? basicName,
+            group: basicName ?? movie.name,
+          });
+          const qualityLabel = p.quality_info?.quality ?? p.quality_info?.resolution ?? undefined;
+          const fromQi = parseQualityHints(qualityLabel);
+          const fromLabel = parseQualityHints([categoryName, basicName, movie.name].filter(Boolean).join(" "));
+          const resolutionHeight =
+            fromQi.height ?? hints.qualityHeight ?? fromLabel.height ?? titleHints.qualityHeight;
+          const hdr = Boolean(fromQi.hdr ?? hints.hdr ?? fromLabel.hdr ?? titleHints.hdr);
+          return {
+            streamId: p.stream_id ?? undefined,
+            m3uAccountId: p.m3u_account?.id,
+            label: categoryName ?? basicName ?? qualityLabel,
+            catalogueLanguage: hints.language,
+            qualityLabel,
+            resolutionHeight,
+            hdr: hdr || undefined,
+          };
+        });
         if (durationSecs == null) {
           for (const p of providers) {
             const nested = p.movie?.duration_secs;
@@ -850,21 +921,20 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       }
     }
 
+    const ranked = rankDispatcharrStreamCandidates(candidates, languages, {
+      untaggedPlayable: isPlayableLanguageConfidence(languageConfidence),
+    });
+    if (candidates.length > 0 && ranked.length === 0) return null;
+
     return mapMovieToMedia(
       durationSecs != null ? { ...movie, duration_secs: durationSecs } : movie,
       {
-        candidates,
+        candidates: ranked,
         catalogueLanguage:
           catalogueLanguage ?? parseCatalogueLanguageHints({ name: movie.name }).language,
+        languageConfidence,
       },
     );
-  }
-
-  /** Rank streams: preferred language (from category), then quality (4K > unknown). */
-  private rankStreamCandidates(
-    candidates: DispatcharrStreamCandidate[],
-  ): DispatcharrStreamCandidate[] {
-    return rankDispatcharrStreamCandidates(candidates, this.preferredLanguages);
   }
 
   /** Expose for tests / indexers */

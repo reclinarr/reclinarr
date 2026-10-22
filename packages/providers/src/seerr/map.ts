@@ -178,11 +178,38 @@ export function mapMediaInfoToRequestAvailability(
     requestStatus === "PENDING" ||
     requestStatus === "APPROVED";
 
+  const downloadProgress = mapDownloadProgress(mediaInfo?.downloadStatus);
+
   return {
     provider: "seerr",
-    requestable: !blocked && !availableInLibrary && !alreadyPending,
+    requestable: !blocked && !availableInLibrary && !alreadyPending && !downloadProgress,
     requestStatus,
     mediaStatus,
+    ...(downloadProgress ? { downloadProgress } : {}),
+  };
+}
+
+function mapDownloadProgress(
+  items: SeerrMediaInfo["downloadStatus"],
+): RequestAvailability["downloadProgress"] {
+  const sized = (items ?? []).filter((item) => typeof item.size === "number" && item.size > 0);
+  if (!sized.length) return undefined;
+  let totalBytes = 0;
+  let bytesLeft = 0;
+  let estimatedCompletionTime: string | undefined;
+  for (const item of sized) {
+    const size = item.size!;
+    totalBytes += size;
+    bytesLeft += Math.min(size, Math.max(0, item.sizeLeft ?? size));
+    const eta = item.estimatedCompletionTime ?? undefined;
+    if (eta && (!estimatedCompletionTime || eta > estimatedCompletionTime)) {
+      estimatedCompletionTime = eta;
+    }
+  }
+  return {
+    totalBytes,
+    bytesLeft,
+    ...(estimatedCompletionTime ? { estimatedCompletionTime } : {}),
   };
 }
 
@@ -208,6 +235,7 @@ export function mapSearchResultToMedia(result: SeerrSearchResult): Media | null 
       title,
       originalTitle:
         result.mediaType === "movie" ? result.originalTitle : result.originalName,
+      originalLanguage: result.originalLanguage ?? undefined,
       year: yearFromDate(date),
       overview: result.overview ?? undefined,
       posterUrl: tmdbImageUrl(result.posterPath, "w500"),
@@ -232,6 +260,7 @@ export function mapMovieDetailsToMedia(details: SeerrMovieDetails): Media {
     metadata: {
       title: details.title,
       originalTitle: details.originalTitle,
+      originalLanguage: details.originalLanguage ?? undefined,
       year: yearFromDate(details.releaseDate),
       overview: details.overview ?? undefined,
       posterUrl: tmdbImageUrl(details.posterPath, "w500"),
@@ -259,6 +288,7 @@ export function mapTvDetailsToMedia(details: SeerrTvDetails): Media {
     metadata: {
       title: details.name,
       originalTitle: details.originalName,
+      originalLanguage: details.originalLanguage ?? undefined,
       year: yearFromDate(details.firstAirDate),
       overview: details.overview ?? undefined,
       posterUrl: tmdbImageUrl(details.posterPath, "w500"),

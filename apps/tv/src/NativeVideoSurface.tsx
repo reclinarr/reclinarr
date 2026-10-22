@@ -34,7 +34,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
   const kind = classifyPlayback(props.source);
   const origin = getClient().baseUrl || "http://localhost:8787";
   const videoType = kind === "hls" ? "m3u8" : kind === "mpegts" ? "mpegts" : undefined;
-  const sessionId = props.headers["x-streamerr-session"];
+  const sessionId = props.headers["x-reclinarr-session"];
 
   useEffect(() => {
     props.onSeekRequest?.((seconds) => ref.current?.seek(seconds));
@@ -94,6 +94,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         })
       }
       onBuffer={(e) => props.onBuffer?.({ isBuffering: e.isBuffering })}
+      onReadyForDisplay={() => props.onReadyForDisplay?.()}
       onEnd={props.onEnd}
       onError={(e) => {
         const detail = e.error?.errorString ?? "Playback failed";

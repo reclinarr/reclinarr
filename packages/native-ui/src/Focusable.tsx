@@ -6,7 +6,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { isTvFocused, tvFocusFill } from "./focus.js";
+import { isTvFocused, tvFocusFill, useTvFocusAllowed } from "./focus.js";
 import { colors } from "./theme.js";
 
 /** TV-style focusable control (D-pad). Prefer `Button` with `showFocusRing` for shared CTAs. */
@@ -15,11 +15,16 @@ export function Focusable({
   style,
   focusedStyle,
   children,
+  hasTVPreferredFocus,
+  focusable,
   ...rest
 }: PressableProps & { label?: string; focusedStyle?: StyleProp<ViewStyle> }) {
+  const focusAllowed = useTvFocusAllowed();
   return (
     <Pressable
       {...rest}
+      focusable={focusAllowed && focusable !== false}
+      hasTVPreferredFocus={focusAllowed ? hasTVPreferredFocus : undefined}
       style={(state) => [
         styles.base,
         typeof style === "function" ? style(state) : style,

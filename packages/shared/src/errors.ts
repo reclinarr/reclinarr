@@ -119,6 +119,22 @@ export function isBehindLiveWindowError(
 }
 
 /**
+ * Live errors that should surface immediately instead of auto-reloading
+ * (another device holding the IPTV slot, auth, missing channel).
+ */
+export function isNonRecoverableLiveError(message?: string | null): boolean {
+  if (!message) return false;
+  if (message === IPTV_STREAM_BUSY_MESSAGE) return true;
+  if (isIptvConnectionLimitError(message)) return true;
+  if (/another iptv stream is already open/i.test(message)) return true;
+  if (/not signed in|session missing|unauthorized|forbidden/i.test(message)) return true;
+  if (/channel (is )?not playable|channel not found|no longer selected/i.test(message)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Map opaque player IO failures (mpegts.js / hls.js) to a clearer IPTV message.
  */
 export function formatPlaybackIoError(info: {

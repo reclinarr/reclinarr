@@ -53,6 +53,71 @@ function resumePositionSeconds(media: Media): number | undefined {
   return undefined;
 }
 
+/** Percent of the Seerr (Radarr/Sonarr) download that has landed, or null when nothing is queued. */
+export function requestDownloadPercent(media: Pick<Media, "availability">): number | null {
+  const seerr = media.availability.find((a) => a.provider === "seerr");
+  const progress = seerr?.provider === "seerr" ? seerr.downloadProgress : undefined;
+  if (!progress || progress.totalBytes <= 0) return null;
+  const done = progress.totalBytes - progress.bytesLeft;
+  return Math.max(0, Math.min(99, Math.floor((done / progress.totalBytes) * 100)));
+}
+
+export type PrimaryActionKind = "play" | "request" | "requested" | "downloading" | "none";
+
+export interface PrimaryAction {
+  kind: PrimaryActionKind;
+  /** Button label without the ▶ glyph. */
+  label: string;
+  /** Download percent for `downloading` (null while the size is unknown). */
+  progress: number | null;
+  /** One-line explanation of where playback/download comes from. */
+  hint: string;
+}
+
+/**
+ * Single source of truth for the hero/details primary button:
+ * library/cache → Play, IPTV → Play on demand, otherwise Request via Seerr,
+ * then Requested → Downloading n% until the library picks it up.
+ */
+export function primaryAction(media: Media): PrimaryAction {
+  const resume = resumePositionSeconds(media) != null;
+  switch (media.preferredAction) {
+    case "PLAY_JELLYFIN":
+    case "PLAY_CACHE":
+      return { kind: "play", label: resume ? "Resume" : "Play", progress: null, hint: "Ready to play" };
+    case "PLAY_IPTV": {
+      const percent = requestDownloadPercent(media);
+      return {
+        kind: "play",
+        label: resume ? "Resume on demand" : "Play on demand",
+        progress: null,
+        hint: percent != null ? `Library copy ${percent}% downloaded` : "",
+      };
+    }
+    case "REQUEST":
+      return {
+        kind: "request",
+        label: "Request",
+        progress: null,
+        hint: "Not available on demand · Request it for download",
+      };
+  }
+  const seerr = media.availability.find((a) => a.provider === "seerr");
+  if (seerr?.provider === "seerr") {
+    const percent = requestDownloadPercent(media);
+    if (percent != null) {
+      return { kind: "downloading", label: `Downloading ${percent}%`, progress: percent, hint: "Requested · Downloading" };
+    }
+    if (seerr.requestStatus === "PENDING" || (seerr.mediaStatus === "PENDING" && seerr.requestStatus !== "APPROVED")) {
+      return { kind: "requested", label: "Requested", progress: null, hint: "Requested · Waiting for approval" };
+    }
+    if (seerr.mediaStatus === "PROCESSING" || seerr.requestStatus === "APPROVED") {
+      return { kind: "requested", label: "Queued", progress: null, hint: "Requested · Looking for a release" };
+    }
+  }
+  return { kind: "none", label: actionLabel(media), progress: null, hint: "" };
+}
+
 export function actionLabel(media: Media): string {
   switch (media.preferredAction) {
     case "PLAY_JELLYFIN":
@@ -72,6 +137,8 @@ export function actionLabel(media: Media): string {
       if (iptv?.available && !iptv.canPlay) {
         return "On IPTV";
       }
+      const percent = requestDownloadPercent(media);
+      if (percent != null) return `Downloading ${percent}%`;
       const seerr = media.availability.find((a) => a.provider === "seerr");
       if (seerr?.mediaStatus === "PENDING" || seerr?.requestStatus === "PENDING") {
         return "Requested";
@@ -87,10 +154,12 @@ export function actionLabel(media: Media): string {
   }
 }
 
-/** Poster chip for discovery rails — Download when requestable and not on IPTV. */
+/** Poster chip for discovery rails — Request when requestable and not on IPTV. */
 export function cardBadge(media: Media): string | undefined {
   if (media.preferredAction === "PLAY_JELLYFIN" || media.preferredAction === "PLAY_CACHE") return "Ready to play";
   if (media.preferredAction === "PLAY_IPTV") return "On demand";
+  const percent = requestDownloadPercent(media);
+  if (percent != null) return `Downloading ${percent}%`;
   const seerr = media.availability.find((a) => a.provider === "seerr");
   if (seerr?.mediaStatus === "PENDING" || seerr?.requestStatus === "PENDING") {
     return "Requested";
@@ -100,7 +169,7 @@ export function cardBadge(media: Media): string | undefined {
   }
   const onIptv = media.availability.some((a) => a.provider === "dispatcharr" && a.available);
   if (media.preferredAction === "REQUEST" && !onIptv) {
-    return "Download";
+    return "Request";
   }
   return undefined;
 }

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pressable, StyleSheet, Text, TVFocusGuideView, View } from "react-native";
 import {
@@ -8,7 +8,15 @@ import {
   useRoute,
 } from "@react-navigation/native";
 import { logout } from "@reclinarr/client";
-import { BrandLogo, Shade, colors, isTvFocused, webBg } from "@reclinarr/native-ui";
+import {
+  BrandLogo,
+  Shade,
+  TvFocusLockProvider,
+  TvInitialFocusSuppressProvider,
+  colors,
+  isTvFocused,
+  webBg,
+} from "@reclinarr/native-ui";
 import type { Nav, RootStackParamList } from "../nav";
 import { useTvLayout } from "../layout";
 import { clearSession } from "../session";
@@ -23,14 +31,23 @@ const LINKS: Array<{ name: keyof RootStackParamList; label: string }> = [
   { name: "Live", label: "Live TV" },
 ];
 
+/** Settle time before a focused tab opens, so skimming across tabs only loads the last one. */
+const TAB_SKIM_DELAY_MS = 200;
+
+/** Route opened by skimming the nav; its Chrome keeps focus on the tab instead of the page. */
+let skimTarget: keyof RootStackParamList | null = null;
+
 export function Chrome({
   username,
   children,
   overlay = false,
   scrolled = false,
+  contentFocus = false,
 }: {
   username?: string;
   children: ReactNode;
+  /** Page content claims initial D-pad focus (hero / restored rail card), not the active tab. */
+  contentFocus?: boolean;
   /** Home sits under a transparent bar until the page scrolls. */
   overlay?: boolean;
   scrolled?: boolean;
@@ -46,6 +63,35 @@ export function Chrome({
     return Boolean(top && FOCUS_OVERLAY_ROUTES.has(top.name as keyof RootStackParamList));
   });
   const canFocus = isFocused && !overlayOpen;
+  const canFocusRef = useRef(canFocus);
+  canFocusRef.current = canFocus;
+  const pendingNav = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One-shot like usePreferredFocusOnce, re-armed each time an overlay closes.
+  const [tabFocusLanded, setTabFocusLanded] = useState(false);
+  // Consume the skim flag on this visit so a later non-skim entry can still
+  // prefer hero/rails. Keep local state so late-mounting content stays suppressed.
+  const [skimming, setSkimming] = useState(() => skimTarget === route.name);
+  useEffect(() => {
+    if (canFocus) return;
+    setTabFocusLanded(false);
+    setSkimming(false);
+    if (pendingNav.current) {
+      clearTimeout(pendingNav.current);
+      pendingNav.current = null;
+    }
+  }, [canFocus]);
+  useEffect(() => {
+    return () => {
+      if (pendingNav.current) clearTimeout(pendingNav.current);
+    };
+  }, []);
+  useEffect(() => {
+    if (skimTarget !== route.name) return;
+    setSkimming(true);
+    skimTarget = null;
+  }, [route.name, isFocused]);
+  const retainTabFocus = skimming || skimTarget === route.name;
+  const [activeTab, setActiveTab] = useState<View | null>(null);
   const layout = useTvLayout();
   const [menuOpen, setMenuOpen] = useState(false);
   const solid = !overlay || scrolled || menuOpen;
@@ -63,14 +109,47 @@ export function Chrome({
     navigation.reset({ index: 0, routes: [{ name: "Login" }] });
   }
 
+  function clearPendingNav() {
+    if (pendingNav.current) {
+      clearTimeout(pendingNav.current);
+      pendingNav.current = null;
+    }
+  }
+
+  function openTab(name: keyof RootStackParamList, fromFocus: boolean) {
+    clearPendingNav();
+    if (fromFocus && !canFocusRef.current) return;
+    if (route.name === name) return;
+    if (fromFocus) skimTarget = name;
+    navigation.navigate(name as never);
+  }
+
+  function onTabFocus(name: keyof RootStackParamList, active: boolean) {
+    if (active) {
+      setTabFocusLanded(true);
+      return;
+    }
+    if (!canFocusRef.current) return;
+    clearPendingNav();
+    pendingNav.current = setTimeout(() => {
+      pendingNav.current = null;
+      openTab(name, true);
+    }, TAB_SKIM_DELAY_MS);
+  }
+
   return (
-    // Transparent Details keeps this screen mounted — disable the whole subtree
-    // so D-pad cannot move selection on Home/Catalog behind the modal.
-    <TVFocusGuideView
-      style={[styles.shell, { pointerEvents: canFocus ? "auto" : "none" }]}
-    >
-      {menuOpen ? (
-        <Pressable style={styles.dismiss} onPress={() => setMenuOpen(false)} />
+    // Details/Player keep this screen mounted underneath. Android TV still
+    // routes D-pad into focusable descendants unless we tear them down.
+    <TvFocusLockProvider allow={canFocus}>
+      <TVFocusGuideView
+        style={[styles.shell, { pointerEvents: canFocus ? "auto" : "none" }]}
+      >
+      {menuOpen && canFocus ? (
+        <Pressable
+          style={styles.dismiss}
+          onPress={() => setMenuOpen(false)}
+          focusable={canFocus}
+        />
       ) : null}
       <View
         style={[
@@ -84,14 +163,24 @@ export function Chrome({
         <View style={styles.wordmarkBtn} importantForAccessibility="no-hide-descendants">
           <BrandLogo size={30} />
         </View>
-        <View style={styles.nav}>
+        {/* Entering the tab row (e.g. Up from the hero) lands on the current page's tab. */}
+        <TVFocusGuideView
+          style={styles.nav}
+          destinations={activeTab ? [activeTab as never] : undefined}
+        >
           {LINKS.map((link) => {
             const active = route.name === link.name;
             return (
               <Pressable
                 key={link.name}
-                onPress={() => navigation.navigate(link.name as never)}
-                hasTVPreferredFocus={canFocus && active}
+                ref={active ? setActiveTab : undefined}
+                onPress={() => openTab(link.name, false)}
+                focusable={canFocus}
+                hasTVPreferredFocus={
+                  canFocus && active && !tabFocusLanded && (retainTabFocus || !contentFocus)
+                }
+                onFocus={() => onTabFocus(link.name, active)}
+                onBlur={clearPendingNav}
                 style={(s) => [
                   styles.link,
                   active && styles.linkActive,
@@ -115,10 +204,11 @@ export function Chrome({
               </Pressable>
             );
           })}
-        </View>
+        </TVFocusGuideView>
         <View style={styles.tools}>
           <Pressable
             onPress={() => navigation.navigate("Search")}
+            focusable={canFocus}
             style={(s) => [styles.iconBtn, isTvFocused(s) && styles.iconFocused]}
             accessibilityLabel="Search"
           >
@@ -129,6 +219,7 @@ export function Chrome({
           <View>
             <Pressable
               onPress={() => setMenuOpen((v) => !v)}
+              focusable={canFocus}
               style={(s) => [styles.avatar, isTvFocused(s) && styles.avatarFocused]}
             >
               <Text style={styles.avatarText}>{initial}</Text>
@@ -138,6 +229,7 @@ export function Chrome({
                 <Text style={styles.menuName}>{username || "Profile"}</Text>
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  focusable={canFocus}
                   onPress={() => {
                     setMenuOpen(false);
                     navigation.navigate("Downloads");
@@ -153,6 +245,7 @@ export function Chrome({
                 </Pressable>
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  focusable={canFocus}
                   onPress={() => {
                     setMenuOpen(false);
                     navigation.navigate("Settings");
@@ -168,6 +261,7 @@ export function Chrome({
                 </Pressable>
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  focusable={canFocus}
                   onPress={() => {
                     setMenuOpen(false);
                     navigation.navigate("Requests");
@@ -183,6 +277,7 @@ export function Chrome({
                 </Pressable>
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  focusable={canFocus}
                   onPress={() => {
                     setMenuOpen(false);
                     navigation.navigate("Server", { change: true });
@@ -198,6 +293,7 @@ export function Chrome({
                 </Pressable>
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                  focusable={canFocus}
                   onPress={() => {
                     setMenuOpen(false);
                     void signOut();
@@ -216,8 +312,19 @@ export function Chrome({
           </View>
         </View>
       </View>
-      <View style={styles.body}>{children}</View>
-    </TVFocusGuideView>
+      <View
+        style={styles.body}
+        pointerEvents={canFocus ? "auto" : "none"}
+        // Empty host while overlay is open — no PosterCards/Pressables to steal focus.
+        focusable={false}
+        importantForAccessibility={canFocus ? "auto" : "no-hide-descendants"}
+      >
+        <TvInitialFocusSuppressProvider suppress={retainTabFocus}>
+          {canFocus ? children : null}
+        </TvInitialFocusSuppressProvider>
+      </View>
+      </TVFocusGuideView>
+    </TvFocusLockProvider>
   );
 }
 

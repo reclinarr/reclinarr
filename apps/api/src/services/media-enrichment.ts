@@ -1,5 +1,5 @@
 import type { Media } from "@reclinarr/shared";
-import { resolvePreferredAction } from "@reclinarr/shared";
+import { resolvePreferredAction, tmdbLanguageReference } from "@reclinarr/shared";
 import { DispatcharrProvider, type UserContext } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
 import { lookupDispatcharrIndex, rememberDispatcharrMedia } from "./dispatcharr-index.js";
@@ -16,6 +16,13 @@ function dispatcharrAvailFromIndex(
   tmdbId: number,
   mediaType: "movie" | "tv",
 ): Media["availability"][number] {
+  const languageConfidence =
+    indexedHit.languageConfidence === "corroborated" ||
+    indexedHit.languageConfidence === "confirmed"
+      ? indexedHit.languageConfidence
+      : indexedHit.catalogueLanguage
+        ? ("confirmed" as const)
+        : undefined;
   return {
     provider: "dispatcharr" as const,
     available: true,
@@ -25,8 +32,10 @@ function dispatcharrAvailFromIndex(
     uuid: indexedHit.uuid,
     tmdbId: String(tmdbId),
     catalogueLanguage: indexedHit.catalogueLanguage ?? undefined,
+    ...(languageConfidence ? { languageConfidence } : {}),
     candidates: indexedHit.streamId ? [{ streamId: indexedHit.streamId }] : [],
-    canPlay: mediaType === "movie",
+    // Series Play resolves to the resume/first episode server-side.
+    canPlay: true,
   };
 }
 
@@ -163,6 +172,7 @@ export async function resolveMediaAvailabilityByTmdb(
     .findVodByTmdb(tmdbId, mediaType, {
       titleHint: seerrMedia?.metadata.title,
       yearHint: seerrMedia?.metadata.year,
+      reference: tmdbLanguageReference(seerrMedia?.metadata),
       ...(indexed?.dispatcharrId != null ? { dispatcharrId: indexed.dispatcharrId } : {}),
     })
     .catch(() => null);
@@ -236,19 +246,7 @@ export function enrichDiscoveryRow(
       : null;
 
     const dispatcharrAvail = indexedHit
-      ? ({
-          provider: "dispatcharr" as const,
-          available: true,
-          ...(mediaType === "movie"
-            ? { movieId: indexedHit.dispatcharrId }
-            : { seriesId: indexedHit.dispatcharrId }),
-          uuid: indexedHit.uuid,
-          tmdbId: String(tmdbId),
-          catalogueLanguage: indexedHit.catalogueLanguage ?? undefined,
-          candidates: indexedHit.streamId ? [{ streamId: indexedHit.streamId }] : [],
-          // Series play is episode-level; movies can start from the card.
-          canPlay: mediaType === "movie",
-        } as const)
+      ? dispatcharrAvailFromIndex(indexedHit, tmdbId, mediaType)
       : null;
 
     const availability = [

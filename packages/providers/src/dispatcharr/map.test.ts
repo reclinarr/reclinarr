@@ -54,6 +54,24 @@ describe("dispatcharr map", () => {
     }
   });
 
+  it("attaches languageConfidence when the picker vouched for the copy", () => {
+    const media = mapMovieToMedia(
+      {
+        id: 4,
+        uuid: "44444444-4444-4444-4444-444444444444",
+        name: "NF - Zootopia",
+        tmdb_id: "269149",
+      },
+      { catalogueLanguage: "en", languageConfidence: "corroborated" },
+    );
+    const da = media.availability[0];
+    expect(da?.provider).toBe("dispatcharr");
+    if (da?.provider === "dispatcharr") {
+      expect(da.catalogueLanguage).toBe("en");
+      expect(da.languageConfidence).toBe("corroborated");
+    }
+  });
+
   it("reads SxxExx from the IPTV title when season fields are missing", () => {
     const media = mapEpisodeToMedia(
       {
@@ -71,7 +89,7 @@ describe("dispatcharr map", () => {
     expect(media.preferredAction).toBe("PLAY_IPTV");
   });
 
-  it("maps series as available but not directly playable", () => {
+  it("maps series as playable on demand", () => {
     const media = mapSeriesToMedia({
       id: 2,
       uuid: "22222222-2222-2222-2222-222222222222",
@@ -80,11 +98,11 @@ describe("dispatcharr map", () => {
       episode_count: 62,
     });
     expect(media.identity.mediaType).toBe("tv");
-    expect(media.preferredAction).toBe("NONE");
+    expect(media.preferredAction).toBe("PLAY_IPTV");
     const da = media.availability[0];
     if (da?.provider === "dispatcharr") {
       expect(da.available).toBe(true);
-      expect(da.canPlay).toBe(false);
+      expect(da.canPlay).toBe(true);
     }
   });
 });

@@ -18,21 +18,6 @@ Reclinarr sits on top of **Jellyfin**, **Seerr**, and **Dispatcharr**. It does n
                                       CACHE / LIBRARY
 ```
 
-## Upgrading from Streamerr
-
-Reclinarr is the new name for Streamerr. Existing `STREAMERR_*` environment
-variables remain supported; `RECLINARR_*` takes precedence when both are set.
-The existing app bundle/package IDs, session cookies, saved preferences, SQLite
-filename, Compose service key and `streamerr-data` volume are retained so updates
-reuse existing installs and data. `reclinarr://` and `streamerr://` links are supported.
-The GitHub repository URL remains `fearlessfara/streamerr` until it is renamed separately.
-
-After pulling the update, run `npm install` to refresh the renamed `@reclinarr/*`
-workspace links. Native launcher icons and display names require rebuilding the
-app (`npm run ios -w @reclinarr/mobile` or `npm run android -w @reclinarr/tv`).
-For an existing generated native project, first run `npx expo prebuild --no-install`
-in `apps/mobile`, or `EXPO_TV=1 npx expo prebuild --no-install` in `apps/tv`.
-
 Logo source files are in [`assets/branding`](./assets/branding).
 
 ## Current status
@@ -81,7 +66,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 Build the image straight from GitHub (Dockerfile at repo root):
 
 ```bash
-docker build -t reclinarr https://github.com/fearlessfara/streamerr.git
+docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 docker run --env-file .env -p 8787:8787 reclinarr
 ```
 
@@ -94,7 +79,9 @@ docker compose -f docker/docker-compose.git.yml up -d --build
 
 Compose runs **Reclinarr only**. Point env vars at your existing Jellyfin / Seerr / Dispatcharr instances. The Docker image includes **nginx** (media plane), **ffmpeg** (HLS packager), and the API in one container.
 
-Mount `/data/library` (or the `streamerr-data` volume’s `library/` folder) into Jellyfin as a media library root so **Add to Library** promotions are scanned.
+Live TV re-encodes H.264 with the GPU when ffmpeg can open one: VideoToolbox when the API runs on macOS, VAAPI for Intel/AMD when `/dev/dri` is visible, and NVENC or Quick Sync when that encoder is in the ffmpeg build. Otherwise it uses libx264. Set `RECLINARR_HWACCEL=off` to force software. Alpine's ffmpeg in the image includes VAAPI, and the image installs the VAAPI drivers. NVENC needs an ffmpeg built with `h264_nvenc` (`FFMPEG_PATH`). Docker on macOS runs a Linux VM, so VideoToolbox applies to a native `npm run dev` API process. On a Linux host, uncomment the `/dev/dri` device mount in the compose file.
+
+Mount `/data/library` (or the `reclinarr-data` volume’s `library/` folder) into Jellyfin as a media library root so **Add to Library** promotions are scanned.
 
 ## Configuration
 
@@ -104,9 +91,12 @@ See [`.env.example`](./.env.example).
 |----------|---------|
 | `RECLINARR_PORT` | API listen port |
 | `RECLINARR_CACHE_MAX_BYTES` | Max size of CACHE acquisitions (default 50 GiB) |
-| `RECLINARR_CACHE_TTL_MS` | Idle CACHE TTL (default 7 days) |
+| `RECLINARR_CACHE_TTL_MS` | Max time an idle CACHE file is kept (default 7 days) |
+| `RECLINARR_CACHE_WATCHED_TTL_MS` | Delete a CACHE file this long after it was watched past 95% (default 24 hours). Playing the next episode frees earlier watched episodes immediately |
 | `RECLINARR_IPTV_MAX_CONNECTIONS` | Concurrent IPTV upstreams (default 3) |
 | `FFMPEG_PATH` | Optional path to ffmpeg (HLS packager) |
+| `RECLINARR_HWACCEL` | Live encoder: `auto` (default), `off`, `nvenc`, `qsv`, `vaapi`, `videotoolbox` |
+| `RECLINARR_VAAPI_DEVICE` | VAAPI/QSV render node (default: first `/dev/dri/renderD*`) |
 | `RECLINARR_MEDIA_PLANE` | `node` (local) or `nginx` (Docker) |
 | `JELLYFIN_URL` | Jellyfin base URL |
 | `SEERR_URL` / `SEERR_API_KEY` | Seerr |

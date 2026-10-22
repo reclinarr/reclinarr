@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { buildLiveHlsFfmpegArgs, LiveHlsManager } from "./live-hls.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { liveVideoEncoder } from "./ffmpeg-video-encoder.js";
+import {
+  buildLiveHlsFfmpegArgs,
+  liveHlsRestartDelayMs,
+  LiveHlsManager,
+} from "./live-hls.js";
 import { IptvConnectionManager } from "./iptv-connection-manager.js";
 
 describe("live viewer ownership", () => {
@@ -24,6 +29,49 @@ describe("live viewer ownership", () => {
   });
 });
 
+describe("liveHlsRestartDelayMs", () => {
+  it("backs off and caps", () => {
+    expect(liveHlsRestartDelayMs(1)).toBe(750);
+    expect(liveHlsRestartDelayMs(2)).toBe(1_500);
+    expect(liveHlsRestartDelayMs(5)).toBe(12_000);
+    expect(liveHlsRestartDelayMs(10)).toBe(12_000);
+  });
+});
+
+describe("LiveHlsManager auto-restart", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("tracks whether a channel still has viewers", () => {
+    const manager = new LiveHlsManager("/tmp/reclinarr-restart-test", new IptvConnectionManager(2));
+    manager.registerViewer("ios", "ch-a");
+    manager.registerViewer("web", "ch-a");
+    expect(manager.channelHasViewers("ch-a")).toBe(true);
+    expect(manager.releaseViewer("ios", "ch-a")).toBeUndefined();
+    expect(manager.channelHasViewers("ch-a")).toBe(true);
+    expect(manager.releaseViewer("web", "ch-a")).toBe("ch-a");
+    expect(manager.channelHasViewers("ch-a")).toBe(false);
+  });
+
+  it("schedules ensureReady again after an unexpected remux exit", async () => {
+    vi.useFakeTimers();
+    const manager = new LiveHlsManager("/tmp/reclinarr-restart-test", new IptvConnectionManager(2));
+    manager.registerViewer("ios", "ch-a");
+    const ensure = vi.spyOn(manager, "ensureReady").mockResolvedValue(undefined);
+    // Simulate ffmpeg dying while the viewer is still tuned.
+    (manager as unknown as { openers: Map<string, unknown> }).openers.set("ch-a", async () => {
+      throw new Error("unused");
+    });
+    (manager as unknown as { scheduleRestart: (uuid: string) => void }).scheduleRestart("ch-a");
+    expect(ensure).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(750);
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0]?.[0]).toBe("ch-a");
+    manager.stop();
+  });
+});
+
 describe("buildLiveHlsFfmpegArgs", () => {
   it("locks A/V with aresample async and time-based keyframes", () => {
     const args = buildLiveHlsFfmpegArgs("/tmp/live-hls/ch", "/tmp/live-hls/ch/index.m3u8");
@@ -34,5 +82,42 @@ describe("buildLiveHlsFfmpegArgs", () => {
     expect(args).toContain("-max_interleave_delta");
     expect(args).toContain("delete_segments+independent_segments+omit_endlist");
     expect(args.at(-1)).toBe("/tmp/live-hls/ch/index.m3u8");
+    expect(args.slice(args.indexOf("-c:v"), args.indexOf("-af"))).toEqual([
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-tune",
+      "zerolatency",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "3.1",
+      "-pix_fmt",
+      "yuv420p",
+      "-force_key_frames",
+      "expr:gte(t,n_forced*2)",
+      "-g",
+      "60",
+      "-keyint_min",
+      "48",
+      "-sc_threshold",
+      "0",
+      "-bf",
+      "0",
+    ]);
+  });
+
+  it("puts the VAAPI device before the input and uploads frames", () => {
+    const args = buildLiveHlsFfmpegArgs(
+      "/tmp/live-hls/ch",
+      "/tmp/live-hls/ch/index.m3u8",
+      liveVideoEncoder("vaapi", 2, "/dev/dri/renderD128"),
+    );
+    expect(args.indexOf("-vaapi_device")).toBeLessThan(args.indexOf("-i"));
+    expect(args[args.indexOf("-vaapi_device") + 1]).toBe("/dev/dri/renderD128");
+    expect(args[args.indexOf("-vf") + 1]).toBe("format=nv12,hwupload");
+    expect(args).toContain("h264_vaapi");
+    expect(args).not.toContain("libx264");
   });
 });

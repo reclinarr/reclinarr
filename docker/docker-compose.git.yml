@@ -5,28 +5,33 @@
 #   docker compose -f docker/docker-compose.git.yml up -d --build
 #
 # Image-only (no compose):
-#   docker build -t reclinarr https://github.com/fearlessfara/streamerr.git
-#   docker run --env-file .env -p 8787:8787 -v streamerr-data:/data reclinarr
+#   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
+#   docker run --env-file .env -p 8787:8787 -v reclinarr-data:/data reclinarr
 
 services:
-  streamerr:
+  reclinarr:
     build:
-      context: https://github.com/fearlessfara/streamerr.git#main
+      context: https://github.com/reclinarr/reclinarr.git#main
       dockerfile: Dockerfile
       args:
         EXPO_PUBLIC_POSTHOG_PROJECT_KEY: ${EXPO_PUBLIC_POSTHOG_PROJECT_KEY:-${RECLINARR_POSTHOG_PROJECT_KEY:-}}
     image: reclinarr:git
     container_name: reclinarr
     ports:
-      - "${RECLINARR_PORT:-${STREAMERR_PORT:-8787}}:8787"
+      - "${RECLINARR_PORT:-8787}:8787"
     env_file:
       - ../.env
     environment:
       RECLINARR_DATA_DIR: /data
-      RECLINARR_PUBLIC_URL: ${RECLINARR_PUBLIC_URL:-${STREAMERR_PUBLIC_URL:-http://localhost:8787}}
+      RECLINARR_PUBLIC_URL: ${RECLINARR_PUBLIC_URL:-http://localhost:8787}
+    # Live transcode uses VAAPI when /dev/dri is mounted (Intel/AMD on a Linux host).
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # NVIDIA NVENC needs an ffmpeg with h264_nvenc (FFMPEG_PATH) and `gpus: all`.
+    # macOS VideoToolbox is used when the API process runs on macOS, outside this container.
     volumes:
-      - streamerr-data:/data
+      - reclinarr-data:/data
     restart: unless-stopped
 
 volumes:
-  streamerr-data:
+  reclinarr-data:

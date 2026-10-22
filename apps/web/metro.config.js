@@ -6,7 +6,7 @@ const { URL } = require("node:url");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
-const API_PROXY = process.env.RECLINARR_API_PROXY || process.env.STREAMERR_API_PROXY || "http://127.0.0.1:8787";
+const API_PROXY = process.env.RECLINARR_API_PROXY || "http://127.0.0.1:8787";
 
 const config = getDefaultConfig(projectRoot);
 config.watchFolders = [workspaceRoot];

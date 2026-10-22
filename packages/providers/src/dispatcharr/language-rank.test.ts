@@ -76,14 +76,24 @@ describe("Dispatcharr catalogue language ranking", () => {
     expect(best?.item.name).not.toMatch(/^(DE|KU)\b/);
   });
 
-  it("treats NF service prefix as unknown language (score 0), not a language match", () => {
+  it("hides an untagged-only NF copy without a TMDb reference", () => {
     const onlyNf = zootopiaVariants.filter((m) => m.name.startsWith("NF"));
     const best = pickPreferredByCatalogueLanguage(onlyNf, ["en"], {
       nameOf: (m) => m.name,
       idOf: (m) => m.id,
     });
+    expect(best).toBeNull();
+  });
+
+  it("keeps an untagged NF copy when TMDb title and original language match", () => {
+    const onlyNf = zootopiaVariants.filter((m) => m.name.startsWith("NF"));
+    const best = pickPreferredByCatalogueLanguage(onlyNf, ["en"], {
+      nameOf: (m) => m.name,
+      idOf: (m) => m.id,
+      reference: { title: "Zootopia", originalLanguage: "en" },
+    });
     expect(best?.item.name).toBe("NF - Zootopia");
-    expect(best?.catalogueLanguage).toBeUndefined();
-    expect(best?.score).toBe(0);
+    expect(best?.confidence).toBe("corroborated");
+    expect(best?.catalogueLanguage).toBe("en");
   });
 });

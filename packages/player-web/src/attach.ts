@@ -22,6 +22,9 @@ export function attachWebPlayback(
   let extraCleanup: (() => void) | null = null;
   /** True once we handed resume to hls.js startPosition (avoid a second currentTime seek). */
   let resumeOwnedByHls = false;
+  /** In-player live reloads before bubbling to the app chrome. */
+  let liveReloadAttempts = 0;
+  const LIVE_RELOAD_MAX = 4;
 
   const kind = classifyPlayback(source);
   const url = source.delivery.url;
@@ -58,6 +61,32 @@ export function attachWebPlayback(
   };
   const onEnded = () => onEnd();
   const onVidError = () => {
+    if (destroyed) return;
+    // Live: try rejoining the edge before surfacing a hard failure.
+    if (isLive && liveReloadAttempts < LIVE_RELOAD_MAX) {
+      liveReloadAttempts += 1;
+      try {
+        if (hls) {
+          hls.recoverMediaError();
+          hls.startLoad();
+          return;
+        }
+        if (mpeg) {
+          mpeg.unload();
+          mpeg.load();
+          return;
+        }
+        if (video.src) {
+          const src = video.src;
+          video.src = "";
+          video.src = src;
+          void video.play().catch(() => undefined);
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
     // Stop loaders so a demuxer failure does not hammer the playlist endpoint.
     try {
       hls?.stopLoad();
@@ -78,7 +107,14 @@ export function attachWebPlayback(
   video.addEventListener("error", onVidError);
 
   // Prefer Safari native HLS so AirPlay can route the playlist URL (MSE cannot).
-  const nativeHls = kind === "hls" && Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
+  // Chrome 14x also answers canPlayType("maybe"), but its native HLS fails on our
+  // EVENT playlists — keep hls.js there.
+  const airPlayCapable =
+    typeof window !== "undefined" && "WebKitPlaybackTargetAvailabilityEvent" in window;
+  const nativeHls =
+    kind === "hls" &&
+    Boolean(video.canPlayType("application/vnd.apple.mpegurl")) &&
+    (airPlayCapable || !Hls.isSupported());
 
   if (kind === "mpegts" && mpegts.getFeatureList().mseLivePlayback) {
     mpeg = mpegts.createPlayer(
@@ -103,9 +139,23 @@ export function attachWebPlayback(
         _d: unknown,
         info: { code?: number | string; msg?: string; type?: string },
       ) => {
-        onError(
-          formatPlaybackIoError(info ?? {}) ?? info?.msg ?? "Live stream error",
-        );
+        if (destroyed) return;
+        const busy = formatPlaybackIoError(info ?? {});
+        if (busy) {
+          onError(busy);
+          return;
+        }
+        if (isLive && liveReloadAttempts < LIVE_RELOAD_MAX) {
+          liveReloadAttempts += 1;
+          try {
+            mpeg?.unload();
+            mpeg?.load();
+            return;
+          } catch {
+            /* fall through */
+          }
+        }
+        onError(info?.msg ?? "Live stream error");
       },
     );
   } else if (nativeHls) {
@@ -178,7 +228,7 @@ export function attachWebPlayback(
       airplaySource?.remove();
     };
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (!data.fatal) return;
+      if (!data.fatal || destroyed) return;
       const status = (data.response as { code?: number } | undefined)?.code;
       const busy = formatPlaybackIoError({
         code: status,
@@ -200,7 +250,22 @@ export function attachWebPlayback(
         if (isLive) hls?.startLoad();
         return;
       }
+      if (isLive && liveReloadAttempts < LIVE_RELOAD_MAX) {
+        liveReloadAttempts += 1;
+        try {
+          hls?.stopLoad();
+          hls?.loadSource(url);
+          hls?.startLoad();
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
       onError(data.details || "HLS error");
+    });
+    // Successful live joins reset the soft-reload budget.
+    hls.on(Hls.Events.FRAG_BUFFERED, () => {
+      if (isLive) liveReloadAttempts = 0;
     });
   } else {
     video.src = url;

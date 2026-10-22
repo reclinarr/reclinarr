@@ -13,6 +13,8 @@ export type CreditPerson = z.infer<typeof CreditPersonSchema>;
 export const MediaMetadataSchema = z.object({
   title: z.string(),
   originalTitle: z.string().optional(),
+  /** TMDb original_language (ISO 639-1), used to vouch for untagged IPTV copies. */
+  originalLanguage: z.string().optional(),
   year: z.number().int().optional(),
   overview: z.string().optional(),
   tagline: z.string().optional(),
@@ -98,6 +100,8 @@ export const DispatcharrAvailabilitySchema = z.object({
   imdbId: z.string().optional(),
   /** Language inferred from IPTV catalogue title prefix (en, it, …). */
   catalogueLanguage: z.string().optional(),
+  /** `confirmed` = explicit tag; `corroborated` = untagged but vouched for by TMDb. */
+  languageConfidence: z.enum(["confirmed", "corroborated"]).optional(),
   candidates: z.array(DispatcharrStreamCandidateSchema).default([]),
   canPlay: z.boolean(),
 });
@@ -108,6 +112,14 @@ export const RequestAvailabilitySchema = z.object({
   requestable: z.boolean(),
   requestStatus: z.string().optional(),
   mediaStatus: z.string().optional(),
+  /** Radarr/Sonarr queue totals Seerr reports for an in-flight request (all queued items summed). */
+  downloadProgress: z
+    .object({
+      totalBytes: z.number().nonnegative(),
+      bytesLeft: z.number().nonnegative(),
+      estimatedCompletionTime: z.string().optional(),
+    })
+    .optional(),
 });
 export type RequestAvailability = z.infer<typeof RequestAvailabilitySchema>;
 

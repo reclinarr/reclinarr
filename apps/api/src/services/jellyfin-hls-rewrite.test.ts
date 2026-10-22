@@ -44,7 +44,7 @@ describe("rewriteHlsPlaylist", () => {
       sessionId: "sess-1",
     });
     expect(out).toContain(toHlsProxyUrl("/Videos/abc/seg0.ts", "sess-1"));
-    expect(out).toContain("streamerr_session=sess-1");
+    expect(out).toContain("reclinarr_session=sess-1");
   });
 
   it("rewrites URI= attributes on stream-inf / media tags", () => {
@@ -79,36 +79,36 @@ describe("rewriteHlsPlaylist", () => {
   it("forces https for public hosts so iOS ATS can load HLS segments", () => {
     expect(isLocalPlaybackHost("localhost")).toBe(true);
     expect(isLocalPlaybackHost("192.168.1.20")).toBe(true);
-    expect(isLocalPlaybackHost("streamerr.faraone.ovh")).toBe(false);
-    expect(normalizePublicOrigin("http://streamerr.faraone.ovh")).toBe(
-      "https://streamerr.faraone.ovh",
+    expect(isLocalPlaybackHost("reclinarr.example")).toBe(false);
+    expect(normalizePublicOrigin("http://reclinarr.example")).toBe(
+      "https://reclinarr.example",
     );
     expect(normalizePublicOrigin("http://192.168.1.20:8787")).toBe(
       "http://192.168.1.20:8787",
     );
     expect(
       requestPublicOrigin(
-        { protocol: "http", headers: { host: "streamerr.faraone.ovh" } },
+        { protocol: "http", headers: { host: "reclinarr.example" } },
       ),
-    ).toBe("https://streamerr.faraone.ovh");
+    ).toBe("https://reclinarr.example");
     expect(
       requestPublicOrigin(
         { protocol: "http", headers: { host: "localhost:8787" } },
-        "https://streamerr.faraone.ovh",
+        "https://reclinarr.example",
       ),
-    ).toBe("https://streamerr.faraone.ovh");
+    ).toBe("https://reclinarr.example");
   });
 
   it("emits https absolute segment URLs for public origins", () => {
     const out = rewriteHlsPlaylist("#EXTM3U\nseg0.ts\n", {
       path: "/Videos/abc/master.m3u8",
       sessionId: "sess-1",
-      publicOrigin: normalizePublicOrigin("http://streamerr.faraone.ovh"),
+      publicOrigin: normalizePublicOrigin("http://reclinarr.example"),
     });
     expect(out).toContain(
-      "https://streamerr.faraone.ovh/api/playback/jellyfin/hls?path=",
+      "https://reclinarr.example/api/playback/jellyfin/hls?path=",
     );
-    expect(out).not.toContain("http://streamerr.faraone.ovh/");
+    expect(out).not.toContain("http://reclinarr.example/");
   });
 });
 

@@ -25,6 +25,7 @@ export function rememberDispatcharrMedia(db: AppDb, media: Media): void {
         streamId: da.candidates?.[0]?.streamId,
         title: media.metadata.title,
         catalogueLanguage: da.catalogueLanguage ?? null,
+        languageConfidence: da.languageConfidence ?? null,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -35,6 +36,7 @@ export function rememberDispatcharrMedia(db: AppDb, media: Media): void {
           streamId: da.candidates?.[0]?.streamId,
           title: media.metadata.title,
           catalogueLanguage: da.catalogueLanguage ?? null,
+          languageConfidence: da.languageConfidence ?? null,
           updatedAt: new Date(),
         },
       })
@@ -44,12 +46,36 @@ export function rememberDispatcharrMedia(db: AppDb, media: Media): void {
   }
 }
 
+/**
+ * A cached pick is only trusted when its language is known and preferred.
+ * Rows without a language (legacy untagged picks) are never offered for play.
+ */
+function isTrustedIndexRow(
+  row: { catalogueLanguage: string | null; languageConfidence: string | null },
+  preferredLanguages?: string[],
+): boolean {
+  if (!row.catalogueLanguage && row.languageConfidence !== "corroborated") return false;
+  if (
+    preferredLanguages?.length &&
+    isObviousLanguageMismatch(preferredLanguages, row.catalogueLanguage ?? undefined)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function lookupDispatcharrIndex(
   db: AppDb,
   tmdbId: number,
   mediaType: "movie" | "tv",
   preferredLanguages?: string[],
-): { uuid: string; streamId?: string | null; dispatcharrId: number; catalogueLanguage?: string | null } | null {
+): {
+  uuid: string;
+  streamId?: string | null;
+  dispatcharrId: number;
+  catalogueLanguage?: string | null;
+  languageConfidence?: string | null;
+} | null {
   const rows = db
     .select()
     .from(dispatcharrTmdbIndex)
@@ -60,11 +86,20 @@ export function lookupDispatcharrIndex(
   const hit = rows[0];
   if (!hit) return null;
 
-  if (
-    preferredLanguages?.length &&
-    isObviousLanguageMismatch(preferredLanguages, hit.catalogueLanguage ?? undefined)
-  ) {
-    // Cached pick no longer matches preferred languages — force a re-search.
+  if (!isTrustedIndexRow(hit, preferredLanguages)) {
+    // Untrusted or wrong-language pick — drop it and force a re-search.
+    try {
+      db.delete(dispatcharrTmdbIndex)
+        .where(
+          and(
+            eq(dispatcharrTmdbIndex.tmdbId, tmdbId),
+            eq(dispatcharrTmdbIndex.mediaType, mediaType),
+          ),
+        )
+        .run();
+    } catch {
+      // index is best-effort
+    }
     return null;
   }
 
@@ -73,5 +108,6 @@ export function lookupDispatcharrIndex(
     streamId: hit.streamId,
     dispatcharrId: hit.dispatcharrId,
     catalogueLanguage: hit.catalogueLanguage,
+    languageConfidence: hit.languageConfidence,
   };
 }

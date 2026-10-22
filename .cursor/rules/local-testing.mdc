@@ -10,6 +10,6 @@ When verifying Reclinarr in the browser or via API smoke checks, use the **local
 - Web UI: `http://localhost:5173` (Expo web)
 - API: `http://127.0.0.1:8787` (`/api/health`, login, media, live, playback)
 
-Do **not** use `https://streamerr.faraone.ovh` for routine feature verification unless the user explicitly asks to check production/deploy.
+Do **not** use a remote production deployment for routine feature verification unless the user explicitly asks to check production/deploy.
 
 If localhost is down, start or ask about local `dev:api` / `dev:web` before falling back to remote.

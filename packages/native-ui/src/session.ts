@@ -5,8 +5,8 @@ import {
   type ReclinarrClient,
 } from "@reclinarr/client";
 
-export const SERVER_URL_KEY = "streamerr.serverUrl";
-export const SESSION_KEY = "streamerr.sessionId";
+export const SERVER_URL_KEY = "reclinarr.serverUrl";
+export const SESSION_KEY = "reclinarr.sessionId";
 
 function isPrivateHost(host: string): boolean {
   const h = host.toLowerCase();

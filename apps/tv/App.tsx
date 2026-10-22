@@ -91,6 +91,8 @@ export function App() {
             headerShown: false,
             animation: "fade",
             contentStyle: { backgroundColor: webBg },
+            // Keep underlying screens from holding D-pad while a modal is up.
+            freezeOnBlur: true,
           }}
         >
           <Stack.Screen name="Boot" component={BootScreen} />
@@ -108,9 +110,12 @@ export function App() {
             name="Details"
             component={Details}
             options={{
-              presentation: "transparentModal",
+              // Avoid transparentModal on TV: the Home focus tree stays live underneath
+              // and steals the remote even when pointerEvents/focusable are gated.
+              presentation: "containedModal",
               animation: "fade",
-              contentStyle: { backgroundColor: "transparent" },
+              contentStyle: { backgroundColor: "rgba(0,0,0,0.78)" },
+              gestureEnabled: false,
             }}
           />
           <Stack.Screen name="Player" component={PlayerScreen} />

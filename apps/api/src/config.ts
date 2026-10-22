@@ -40,8 +40,10 @@ const EnvSchema = z.object({
   HTTP_TIMEOUT_MS: z.coerce.number().default(15_000),
   /** Max bytes for CACHE-mode acquisitions (default 50 GiB). */
   RECLINARR_CACHE_MAX_BYTES: z.coerce.number().default(50 * 1024 * 1024 * 1024),
-  /** TTL for idle CACHE files (default 7 days). */
+  /** Max time an idle CACHE file is kept (default 7 days). */
   RECLINARR_CACHE_TTL_MS: z.coerce.number().default(7 * 24 * 60 * 60 * 1000),
+  /** CACHE files watched past 95% are deleted this long after viewing (default 24 hours). */
+  RECLINARR_CACHE_WATCHED_TTL_MS: z.coerce.number().default(24 * 60 * 60 * 1000),
   /** Max concurrent IPTV upstream connections (live + VOD + downloads). */
   RECLINARR_IPTV_MAX_CONNECTIONS: z.coerce.number().int().positive().default(3),
   /**
@@ -53,6 +55,15 @@ const EnvSchema = z.object({
   RECLINARR_VOD_SYNC_INTERVAL_MS: z.coerce.number().int().positive().default(12 * 60 * 60 * 1000),
   FFMPEG_PATH: z.string().optional(),
   FFPROBE_PATH: z.string().optional(),
+  /**
+   * Live TV H.264 encoder. `auto` probes VideoToolbox, VAAPI, NVENC, and Quick Sync
+   * and falls back to libx264. `off` forces the software encoder.
+   */
+  RECLINARR_HWACCEL: z
+    .enum(["auto", "off", "nvenc", "qsv", "vaapi", "videotoolbox"])
+    .default("auto"),
+  /** VAAPI/QSV render node. Default is the first `/dev/dri/renderD*`. */
+  RECLINARR_VAAPI_DEVICE: z.string().optional(),
   NODE_ENV: z.string().optional(),
 });
 
@@ -63,16 +74,7 @@ export type AppConfig = Omit<z.infer<typeof EnvSchema>, "RECLINARR_PREFERRED_LAN
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  // Existing installations can keep their STREAMERR_* environment variables.
-  // Explicit RECLINARR_* values take precedence, including empty strings.
-  const normalized = { ...env };
-  for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith("STREAMERR_")) {
-      const renamed = key.replace(/^STREAMERR_/, "RECLINARR_");
-      if (normalized[renamed] === undefined) normalized[renamed] = value;
-    }
-  }
-  const parsed = EnvSchema.parse(normalized);
+  const parsed = EnvSchema.parse(env);
   const isProd = parsed.NODE_ENV === "production";
   if (isProd && parsed.RECLINARR_SESSION_SECRET === "dev-only-change-me-please") {
     throw new Error(

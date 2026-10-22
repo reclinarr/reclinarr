@@ -17,21 +17,21 @@ export function playResumeKey(identity: MediaIdentity): string {
       identity.seasonNumber != null &&
       identity.episodeNumber != null
     ) {
-      return `streamerr.playResume:tv:${identity.tmdbId}:s${identity.seasonNumber}:e${identity.episodeNumber}`;
+      return `reclinarr.playResume:tv:${identity.tmdbId}:s${identity.seasonNumber}:e${identity.episodeNumber}`;
     }
     if (identity.mediaType === "movie" || identity.mediaType === "other") {
-      return `streamerr.playResume:movie:${identity.tmdbId}`;
+      return `reclinarr.playResume:movie:${identity.tmdbId}`;
     }
-    return `streamerr.playResume:${identity.mediaType}:${identity.tmdbId}`;
+    return `reclinarr.playResume:${identity.mediaType}:${identity.tmdbId}`;
   }
   if (identity.jellyfinItemId) {
-    return `streamerr.playResume:jellyfin:${identity.jellyfinItemId}`;
+    return `reclinarr.playResume:jellyfin:${identity.jellyfinItemId}`;
   }
-  return `streamerr.playResume:unknown`;
+  return `reclinarr.playResume:unknown`;
 }
 
 export function liveResumeKey(channelUuid: string): string {
-  return `streamerr.playResume:live:${channelUuid}`;
+  return `reclinarr.playResume:live:${channelUuid}`;
 }
 
 export async function loadResumeSeconds(

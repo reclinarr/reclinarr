@@ -53,9 +53,11 @@ export function LiveScreen({
   const { height: windowH } = useWindowDimensions();
   const [groupId, setGroupId] = useState<string | "favourites" | "">("");
   const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<LiveSort>("number");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const searchInputRef = useRef<TextInput>(null);
   const filterScrollRef = useRef<ScrollView>(null);
   const channelListRef = useRef<ScrollView>(null);
   const channelScrollY = useRef(0);
@@ -232,18 +234,38 @@ export function LiveScreen({
     <View style={styles.page}>
       {header}
       <View style={styles.bodyPad}>
-        <TextInput
-          style={[styles.search, tv && styles.searchTv]}
-          value={search}
-          onChangeText={(v) => {
-            setSearch(v);
-            setPage(1);
-          }}
-          placeholder="Search channels…"
-          placeholderTextColor={colors.muted}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <Pressable
+          onPress={() => searchInputRef.current?.focus()}
+          onFocus={tv ? () => setSearchFocused(true) : undefined}
+          onBlur={tv ? () => setSearchFocused(false) : undefined}
+          style={(s) => [
+            styles.searchWrap,
+            tv && styles.searchWrapTv,
+            tv && (searchFocused || isTvFocused(s)) && styles.searchWrapFocused,
+          ]}
+        >
+          <TextInput
+            ref={searchInputRef}
+            style={[
+              styles.search,
+              tv && styles.searchTv,
+              tv && searchFocused && styles.searchFocused,
+            ]}
+            focusable={!tv}
+            showSoftInputOnFocus
+            onFocus={tv ? () => setSearchFocused(true) : undefined}
+            onBlur={tv ? () => setSearchFocused(false) : undefined}
+            value={search}
+            onChangeText={(v) => {
+              setSearch(v);
+              setPage(1);
+            }}
+            placeholder="Search channels…"
+            placeholderTextColor={searchFocused ? "#444" : colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </Pressable>
 
         <View style={[styles.toolbar, tv && styles.toolbarTv]}>
           <Button
@@ -659,14 +681,26 @@ function ChannelCard({
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: webBg },
   bodyPad: { paddingHorizontal: 16 },
+  searchWrap: { marginBottom: 10 },
+  searchWrapTv: {
+    marginBottom: 6,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: "transparent",
+  },
+  searchWrapFocused: {
+    borderColor: "#fff",
+    backgroundColor: "#fff",
+    transform: [{ scale: 1.02 }],
+  },
   search: {
     backgroundColor: colors.bg2,
     color: colors.text,
     padding: 12,
     borderRadius: 8,
-    marginBottom: 10,
   },
-  searchTv: { paddingVertical: 8, marginBottom: 6 },
+  searchTv: { paddingVertical: 8 },
+  searchFocused: { backgroundColor: "#fff", color: "#111" },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",

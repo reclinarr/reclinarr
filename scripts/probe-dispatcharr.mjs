@@ -22,7 +22,7 @@ const dispatcharr = new DispatcharrProvider({
   auth: process.env.DISPATCHARR_API_KEY
     ? { type: "apiKey", apiKey: process.env.DISPATCHARR_API_KEY }
     : undefined,
-  reclinarrPublicUrl: (process.env.RECLINARR_PUBLIC_URL ?? process.env.STREAMERR_PUBLIC_URL),
+  reclinarrPublicUrl: process.env.RECLINARR_PUBLIC_URL,
 });
 
 const details = await seerr.getDetails(mediaType, tmdbId);

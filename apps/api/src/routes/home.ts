@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { Media } from "@reclinarr/shared";
-import { resolvePreferredAction } from "@reclinarr/shared";
+import type { Media, TmdbLanguageReference } from "@reclinarr/shared";
+import { resolvePreferredAction, tmdbLanguageReference } from "@reclinarr/shared";
 import type { DiscoveryProvider, UserContext } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
@@ -31,19 +31,25 @@ async function refineIptvNextUp(
       { seasonNumber: season + 1, episodeNumber: 1 },
     ];
     let resolved: Media | null = null;
+    const dispatcharr = ctx.dispatcharr as {
+      findEpisodeBySeriesTmdb?: (
+        seriesTmdbId: number,
+        seasonNumber: number,
+        episodeNumber: number,
+        opts?: { titleHint?: string; reference?: TmdbLanguageReference },
+      ) => Promise<Media | null>;
+    };
+    const seriesDetails = dispatcharr.findEpisodeBySeriesTmdb && ctx.seerr.getDetails
+      ? await ctx.seerr.getDetails("tv", tmdbId).catch(() => null)
+      : null;
     for (const c of candidates) {
-      const dispatcharr = ctx.dispatcharr as {
-        findEpisodeBySeriesTmdb?: (
-          seriesTmdbId: number,
-          seasonNumber: number,
-          episodeNumber: number,
-          opts?: { titleHint?: string },
-        ) => Promise<Media | null>;
-      };
       if (dispatcharr.findEpisodeBySeriesTmdb) {
         resolved = await dispatcharr
           .findEpisodeBySeriesTmdb(tmdbId, c.seasonNumber, c.episodeNumber, {
-            titleHint: item.metadata.title?.replace(/\s*S\d+E\d+\s*$/i, "").trim(),
+            titleHint:
+              seriesDetails?.metadata.title ??
+              item.metadata.title?.replace(/\s*S\d+E\d+\s*$/i, "").trim(),
+            reference: tmdbLanguageReference(seriesDetails?.metadata),
           })
           .catch(() => null);
         if (resolved) break;

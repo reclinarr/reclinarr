@@ -15,7 +15,7 @@ export function CatalogScreen({
   const layout = useTvLayout();
   const nav = useScreenNav();
   return (
-    <Chrome username={username}>
+    <Chrome username={username} contentFocus>
       <SharedCatalog
         layout={layout}
         nav={nav}

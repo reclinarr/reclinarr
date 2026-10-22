@@ -1,5 +1,4 @@
 import { type JSX, useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -9,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "./src/nav";
 import { webLinking } from "./src/linking";
+import { SetupWizard } from "./src/SetupWizard";
 import { attachClient, ensureClient } from "./src/session";
 import {
   DetailsScreen,
@@ -33,46 +33,6 @@ const queryClient = new QueryClient({
 
 function Loading() {
   return <BootSkeleton />;
-}
-
-function SetupScreen() {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
-  const [saving, setSaving] = useState(false);
-  const fields = [
-    ["setupCode", "Setup code from the API log", true],
-    ["JELLYFIN_URL", "Jellyfin address", false],
-    ["SEERR_URL", "Seerr address (optional)", false],
-    ["SEERR_API_KEY", "Seerr API key", true],
-    ["DISPATCHARR_URL", "Dispatcharr address (optional)", false],
-    ["DISPATCHARR_API_KEY", "Dispatcharr API key (or use username/password)", true],
-    ["DISPATCHARR_USERNAME", "Dispatcharr username", false],
-    ["DISPATCHARR_PASSWORD", "Dispatcharr password", true],
-    ["BAZARR_URL", "Bazarr address (optional)", false],
-    ["BAZARR_API_KEY", "Bazarr API key", true],
-  ] as const;
-  const save = async () => {
-    setSaving(true); setMessage("");
-    try {
-      const response = await fetch("/api/setup", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(values),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "Could not save setup");
-      setMessage("Settings saved securely. Restart the Reclinarr server to connect your services.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save setup");
-    } finally { setSaving(false); }
-  };
-  return <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 28, backgroundColor: "#090909" }}>
-    <View style={{ width: "100%", maxWidth: 520, alignSelf: "center", gap: 14 }}>
-      <Text style={{ color: "white", fontSize: 32, fontWeight: "700" }}>Set up Reclinarr</Text>
-      <Text style={{ color: "#aaa", fontSize: 15, lineHeight: 22 }}>Connect Jellyfin to get started. Add your other services now or later. Secrets are stored in a private config file on this server.</Text>
-      {fields.map(([key, label, secret]) => <TextInput key={key} value={values[key] ?? ""} onChangeText={(value) => setValues((v) => ({ ...v, [key]: value }))} placeholder={label} placeholderTextColor="#777" secureTextEntry={secret} autoCapitalize="none" autoCorrect={false} style={{ color: "white", backgroundColor: "#1b1b1b", borderWidth: 1, borderColor: "#333", borderRadius: 8, padding: 13 }} />)}
-      {!!message && <Text style={{ color: "#ddd", lineHeight: 21 }}>{message}</Text>}
-      <Pressable onPress={() => void save()} disabled={saving} style={{ backgroundColor: "#d72130", borderRadius: 8, padding: 15, alignItems: "center" }}><Text style={{ color: "white", fontWeight: "700" }}>{saving ? "Saving…" : "Save setup"}</Text></Pressable>
-    </View>
-  </ScrollView>;
 }
 
 function BootScreen() {
@@ -175,7 +135,7 @@ export function App() {
         >
           <Stack.Screen name="Boot" component={BootScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Setup" component={SetupScreen} />
+          <Stack.Screen name="Setup" component={SetupWizard} />
           <Stack.Screen name="Home" component={Home} />
           <Stack.Screen name="Movies" component={Movies} />
           <Stack.Screen name="Series" component={Series} />

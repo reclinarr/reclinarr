@@ -13,6 +13,10 @@ type WebKitVideo = HTMLVideoElement & {
 
 /** Ignore brief HLS segment gaps so the overlay does not flash every couple of seconds. */
 const BUFFER_SHOW_MS = 500;
+/** Live remux windows are ~2s segments + live-edge seeks — need a longer fuse. */
+const LIVE_BUFFER_SHOW_MS = 2_000;
+/** Don't flash for live micro-stalls while we still have forward media. */
+const LIVE_MIN_AHEAD_S = 1.25;
 
 /**
  * RN-web video surface backed by HTMLVideoElement + hls.js/mpegts.js.
@@ -133,8 +137,20 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
     const video = videoRef.current;
     if (!video) return;
 
+    const isLive = props.isLive;
+    const showAfterMs = isLive ? LIVE_BUFFER_SHOW_MS : BUFFER_SHOW_MS;
     let shown = false;
     let showTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const bufferedAhead = (): number | undefined => {
+      try {
+        if (video.buffered.length === 0) return undefined;
+        const end = video.buffered.end(video.buffered.length - 1);
+        return Math.max(0, end - video.currentTime);
+      } catch {
+        return undefined;
+      }
+    };
 
     const bufferedFraction = (): number | undefined => {
       try {
@@ -155,11 +171,21 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
 
     const markWaiting = () => {
       if (shown || showTimer) return;
+      // Live: hls.js live-edge sync seeks + 2s segment joins fire waiting often while
+      // playback is still fine. Only arm the overlay when forward buffer is thin.
+      if (isLive) {
+        const ahead = bufferedAhead();
+        if (ahead != null && ahead >= LIVE_MIN_AHEAD_S) return;
+      }
       showTimer = setTimeout(() => {
         showTimer = null;
+        if (isLive) {
+          const ahead = bufferedAhead();
+          if (ahead != null && ahead >= LIVE_MIN_AHEAD_S && !video.paused) return;
+        }
         shown = true;
         emit(true);
-      }, BUFFER_SHOW_MS);
+      }, showAfterMs);
     };
 
     const markReady = () => {
@@ -183,7 +209,10 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
       if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) markReady();
     };
     const onCanPlayThrough = () => markReady();
-    const onSeeking = () => markWaiting();
+    // Live latency chasing seeks constantly — treating that as buffering flashes the UI.
+    const onSeeking = () => {
+      if (!isLive) markWaiting();
+    };
     const onSeeked = () => {
       if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA && !video.paused) {
         markReady();
@@ -225,7 +254,7 @@ export function WebVideoSurface(props: VideoSurfaceProps) {
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("progress", onProgress);
     };
-  }, [props.uri]);
+  }, [props.uri, props.isLive]);
 
   useEffect(() => {
     const video = videoRef.current;

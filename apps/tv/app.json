@@ -7,14 +7,13 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": [
-      "reclinarr",
-      "streamerr"
+      "reclinarr"
     ],
     "platforms": [
       "android"
     ],
     "android": {
-      "package": "app.streamerr.tv",
+      "package": "app.reclinarr.tv",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#11141b"
@@ -41,11 +40,18 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Reclinarr to use the microphone for voice search."
+        }
+      ],
+      "./plugins/withOptionalMicrophone.js"
     ],
     "extra": {
       "eas": {
-        "projectId": "streamerr-tv"
+        "projectId": "reclinarr-tv"
       }
     }
   }

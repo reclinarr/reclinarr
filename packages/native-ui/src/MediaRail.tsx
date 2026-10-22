@@ -4,6 +4,7 @@ import type { Media } from "@reclinarr/shared";
 import { canPlayMedia } from "@reclinarr/client";
 import { HScroll } from "./HScroll.js";
 import { PosterCard } from "./PosterCard.js";
+import { usePreferredFocusOnce } from "./focus.js";
 import type { NativeLayout } from "./layout.js";
 import { colors } from "./theme.js";
 import type { Appearance } from "./screens/types.js";
@@ -27,6 +28,7 @@ export function MediaRail({
   onPlay,
   onFocusCard,
   preferFirst = false,
+  preferIndex,
   onLayout,
   railRef,
 }: {
@@ -39,10 +41,12 @@ export function MediaRail({
   railIndex?: number;
   /** Show 1–10 rank badges (Top 10 rails). */
   ranked?: boolean;
-  onOpen: (media: Media) => void;
-  onPlay?: (media: Media) => void;
+  onOpen: (media: Media, index: number) => void;
+  onPlay?: (media: Media, index: number) => void;
   onFocusCard?: () => void;
   preferFirst?: boolean;
+  /** TV: card that should take D-pad focus on mount (rail starts scrolled to it). */
+  preferIndex?: number;
   onLayout?: (e: LayoutChangeEvent) => void;
   /** Root rail view — used by TV pages to scroll focused rails into the viewport. */
   railRef?: Ref<View>;
@@ -63,6 +67,9 @@ export function MediaRail({
     }
   }).current;
   const stride = layout.cardWidth + layout.cardGap;
+  const preferred = preferIndex ?? (preferFirst ? 0 : undefined);
+  const [initialIndex] = useState(preferred);
+  const initialFocus = usePreferredFocusOnce(preferred != null);
 
   function hoverIn(key: string) {
     if (closeTimer.current) {
@@ -90,6 +97,7 @@ export function MediaRail({
   return (
     <View
       ref={railRef}
+      collapsable={false}
       onLayout={onLayout}
       {...(hoverRails ? ({ dataSet: { seRail: hot ? "hot" : "1" } } as object) : null)}
       style={{
@@ -147,10 +155,10 @@ export function MediaRail({
                     rank={ranked ? index + 1 : undefined}
                     expanded={hoveredKey === key}
                     onHoverChange={(on) => (on ? hoverIn(key) : hoverOut(key))}
-                    onPress={() => onOpen(item)}
+                    onPress={() => onOpen(item, index)}
                     onPlay={
                       onPlay && canPlayMedia(item) && item.identity.mediaType !== "tv"
-                        ? () => onPlay(item)
+                        ? () => onPlay(item, index)
                         : undefined
                     }
                   />
@@ -174,6 +182,10 @@ export function MediaRail({
           }}
           keyExtractor={(item, i) => cardKey(item, i)}
           getItemLayout={(_, index) => ({ length: stride, offset: stride * index, index })}
+          // Render through the restored card up front (not initialScrollIndex, whose
+          // re-windowing remounts the focused cell and drops Android focus).
+          initialNumToRender={Math.max(10, (initialIndex ?? 0) + 3)}
+          extraData={`${initialFocus.prefer}:${initialFocus.reclaimed}`}
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({ offset: info.index * stride, animated: false });
           }}
@@ -187,8 +199,12 @@ export function MediaRail({
               variant={focusRails ? "focus" : "caption"}
               showFocusRing={showFocusRing}
               borderRadius={focusRails ? 8 : showFocusRing ? 4 : 6}
-              hasTVPreferredFocus={preferFirst && index === 0 ? true : undefined}
+              hasTVPreferredFocus={preferred === index ? initialFocus.prefer : undefined}
+              focusRef={preferred === index ? initialFocus.ref : undefined}
+              onBlurCard={preferred === index ? initialFocus.onBlur : undefined}
+              forceFocused={preferred === index ? initialFocus.reclaimed : undefined}
               onFocusCard={() => {
+                initialFocus.onFocus();
                 const range = visibleRange.current;
                 if (showFocusRing && (index < range.first || index > range.last)) {
                   listRef.current?.scrollToIndex({
@@ -199,10 +215,10 @@ export function MediaRail({
                 }
                 onFocusCard?.();
               }}
-              onPress={() => onOpen(item)}
+              onPress={() => onOpen(item, index)}
               onPlay={
                 onPlay && canPlayMedia(item) && item.identity.mediaType !== "tv"
-                  ? () => onPlay(item)
+                  ? () => onPlay(item, index)
                   : undefined
               }
             />

@@ -54,7 +54,10 @@ export {
   formatRuntime,
   actionLabel,
   cardBadge,
+  primaryAction,
+  requestDownloadPercent,
 } from "./media.js";
+export type { PrimaryAction, PrimaryActionKind } from "./media.js";
 export { splitIntoShelves } from "./catalog.js";
 export { maxSeekableSecondsForSource } from "./seek-cap.js";
 export {

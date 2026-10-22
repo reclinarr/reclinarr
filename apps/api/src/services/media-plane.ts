@@ -47,5 +47,5 @@ export function hlsAccelPath(acquisitionId: string, relativePath: string): strin
 
 /** True when the request came through our nginx (extra safety for internal-only routes). */
 export function requestFromMediaPlane(req: FastifyRequest): boolean {
-  return req.headers["x-streamerr-media-plane"] === "nginx";
+  return req.headers["x-reclinarr-media-plane"] === "nginx";
 }

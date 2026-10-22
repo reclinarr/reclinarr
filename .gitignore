@@ -32,3 +32,6 @@ secrets/
 # Logs / OS
 *.log
 .DS_Store
+
+# Local marketing / Reddit screenshots (not for commit)
+.tmp/screenshots/

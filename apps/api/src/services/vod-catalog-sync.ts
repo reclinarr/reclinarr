@@ -1,5 +1,11 @@
 import { and, eq, lt, or, sql } from "drizzle-orm";
-import { pickPreferredByCatalogueLanguage, type Media } from "@reclinarr/shared";
+import {
+  pickPreferredByCatalogueLanguage,
+  tmdbLanguageReference,
+  type Media,
+  type PlayableLanguageConfidence,
+  type TmdbLanguageReference,
+} from "@reclinarr/shared";
 import type { DiscoveryProvider, DispatcharrProvider } from "@reclinarr/providers";
 import type { AppDb } from "../db/client.js";
 import { dispatcharrTmdbIndex } from "../db/schema.js";
@@ -20,15 +26,18 @@ export interface VodCatalogWinner {
   uuid: string;
   title: string;
   catalogueLanguage?: string;
+  languageConfidence: PlayableLanguageConfidence;
 }
 
 /**
  * Group catalogue rows by TMDb id, rank language variants, keep one winner each.
  * Rows without a TMDb id must already have been filtered out by the caller.
+ * Without a TMDb reference per group only explicitly tagged copies can win.
  */
 export function pickCatalogWinners(
   candidates: VodCatalogCandidate[],
   preferredLanguages: string[],
+  references?: Map<string, TmdbLanguageReference>,
 ): VodCatalogWinner[] {
   const groups = new Map<string, VodCatalogCandidate[]>();
   for (const c of candidates) {
@@ -39,10 +48,11 @@ export function pickCatalogWinners(
   }
 
   const winners: VodCatalogWinner[] = [];
-  for (const group of groups.values()) {
+  for (const [key, group] of groups) {
     const best = pickPreferredByCatalogueLanguage(group, preferredLanguages, {
       nameOf: (item) => item.name,
       idOf: (item) => item.dispatcharrId,
+      reference: references?.get(key),
     });
     if (!best) continue;
     winners.push({
@@ -52,6 +62,7 @@ export function pickCatalogWinners(
       uuid: best.item.uuid,
       title: best.item.name,
       catalogueLanguage: best.catalogueLanguage,
+      languageConfidence: best.confidence,
     });
   }
   return winners;
@@ -74,6 +85,7 @@ export function applyCatalogWinners(
         streamId: null,
         title: w.title,
         catalogueLanguage: w.catalogueLanguage ?? null,
+        languageConfidence: w.languageConfidence,
         updatedAt: now,
       })
       .onConflictDoUpdate({
@@ -83,6 +95,7 @@ export function applyCatalogWinners(
           uuid: w.uuid,
           title: w.title,
           catalogueLanguage: w.catalogueLanguage ?? null,
+          languageConfidence: w.languageConfidence,
           updatedAt: now,
         },
       })
@@ -106,6 +119,7 @@ export interface HotVodTarget {
   mediaType: "movie" | "tv";
   titleHint?: string;
   yearHint?: number;
+  reference?: TmdbLanguageReference;
 }
 
 const WARM_CONCURRENCY = 2;
@@ -123,6 +137,7 @@ function pushMediaTargets(into: Map<string, HotVodTarget>, items: Media[]): void
       mediaType,
       titleHint: item.metadata.title,
       yearHint: item.metadata.year,
+      reference: tmdbLanguageReference(item.metadata),
     });
   }
 }
@@ -177,6 +192,7 @@ async function resolveHotTarget(
       const match = await dispatcharr.findVodCatalogueMatch(target.tmdbId, target.mediaType, {
         titleHint: target.titleHint,
         yearHint: target.yearHint,
+        reference: target.reference,
       });
       if (!match) return null;
       return {
@@ -186,6 +202,7 @@ async function resolveHotTarget(
         uuid: match.uuid,
         title: match.name,
         catalogueLanguage: match.catalogueLanguage,
+        languageConfidence: match.languageConfidence,
       };
     } catch (err) {
       lastErr = err;

@@ -9,6 +9,7 @@ import type {
   PlaybackSource,
   ProviderCapabilities,
   ProviderHealth,
+  TmdbLanguageReference,
 } from "@reclinarr/shared";
 
 export interface MediaProvider {
@@ -112,11 +113,24 @@ export interface RequestProvider extends MediaProvider {
   }): Promise<{ items: MediaRequestSummary[]; total: number }>;
 }
 
+export interface VodLookupOptions {
+  titleHint?: string;
+  yearHint?: number;
+  /** Known Dispatcharr row id (SQLite index) — skips catalogue search when still valid. */
+  dispatcharrId?: number;
+  preferredLanguages?: string[];
+  /**
+   * TMDb title + original language. Required for untagged IPTV copies to be
+   * offered at all; without it only explicitly tagged copies qualify.
+   */
+  reference?: TmdbLanguageReference;
+}
+
 export interface VodProvider extends MediaProvider {
   findVodByTmdb(
     tmdbId: number,
     mediaType: "movie" | "tv",
-    opts?: { titleHint?: string; yearHint?: number; preferredLanguages?: string[] },
+    opts?: VodLookupOptions,
   ): Promise<Media | null>;
   listEpisodesForSeries?(
     seriesId: number,

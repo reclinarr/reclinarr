@@ -32,7 +32,7 @@ http {
     client_max_body_size 32m;
 
     # Mark requests so the API knows nginx is in front (optional).
-    proxy_set_header X-Streamerr-Media-Plane nginx;
+    proxy_set_header X-Reclinarr-Media-Plane nginx;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -15,7 +15,7 @@ See [native-unification.md](./native-unification.md). The TV app stays D-pad / l
 
 ## Runtime
 
-The monorepo pins `react-native` to `react-native-tvos` (same as Android TV). That fork builds phone and tablet binaries. Mobile omits `@react-native-tvos/config-tv`, so prebuild produces a normal launcher (`app.streamerr.mobile`), not Leanback.
+The monorepo pins `react-native` to `react-native-tvos` (same as Android TV). That fork builds phone and tablet binaries. Mobile omits `@react-native-tvos/config-tv`, so prebuild produces a normal launcher (`app.reclinarr.mobile`), not Leanback.
 
 ## Features
 
