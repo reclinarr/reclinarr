@@ -20,6 +20,20 @@ Reclinarr sits on top of **Jellyfin**, **Seerr**, and **Dispatcharr**. It does n
 
 Logo source files are in [`assets/branding`](./assets/branding).
 
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshots/01-home.png" alt="Home — hero and Continue Watching" width="900" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/04-movies.png" alt="Movies — library grid" width="900" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/02-details.png" alt="Series details — seasons and episodes" width="900" />
+</p>
+
 ## Current status
 
 **Phases 1–9 are implemented** on a shared React Native UI (`@reclinarr/native-ui`) with Expo web, Android TV, and iOS/Android shells:
