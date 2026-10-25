@@ -142,11 +142,21 @@ export function NfVolumeIcon({
   );
 }
 
-/** Next episode: play triangle + end bar. */
+/** Previous episode: start bar + left chevron (skip-to-previous). */
+export function NfPreviousEpisodeIcon({ size = 28, color = "#fff" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={4.3} y={5.5} width={3.2} height={13} rx={0.6} fill={color} />
+      <Path d="M20 5.5v13L9.5 12 20 5.5z" fill={color} />
+    </Svg>
+  );
+}
+
+/** Next episode: right chevron + end bar (skip-to-next). */
 export function NfNextEpisodeIcon({ size = 28, color = "#fff" }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M4 5.5v13l10-6.5L4 5.5z" fill={color} />
+      <Path d="M4 5.5v13l10.5-6.5L4 5.5z" fill={color} />
       <Rect x={16.5} y={5.5} width={3.2} height={13} rx={0.6} fill={color} />
     </Svg>
   );

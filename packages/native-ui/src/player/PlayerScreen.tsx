@@ -70,6 +70,7 @@ import {
   NfNextEpisodeIcon,
   NfPauseIcon,
   NfPlayIcon,
+  NfPreviousEpisodeIcon,
   NfRewind10Icon,
   NfSpeedIcon,
   NfVolumeIcon,
@@ -137,20 +138,30 @@ function IconButton({
   label,
   children,
   large,
+  disabled,
 }: {
   onPress: () => void;
   label: string;
   children: ReactNode;
   large?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={(e) => {
         e?.stopPropagation?.();
+        if (disabled) return;
         onPress();
       }}
-      style={(state) => [styles.iconBtn, large && styles.iconBtnLarge, isTvFocused(state) && tvFocusHighlight]}
+      style={(state) => [
+        styles.iconBtn,
+        large && styles.iconBtnLarge,
+        disabled && styles.iconBtnDisabled,
+        isTvFocused(state) && !disabled && tvFocusHighlight,
+      ]}
       accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
       hitSlop={10}
     >
       {children}
@@ -856,52 +867,76 @@ export function PlayerScreen({
     [onReplaceParams],
   );
 
-  const playNextEpisode = useCallback(async () => {
-    if (!isEpisodePlayback || !seriesTmdbId || episodeBusy) return;
-    reveal(true);
-    setEpisodeBusy(true);
-    setError(null);
-    try {
-      let items = episodeItems;
-      if (!items.length) {
-        const data = await seriesEpisodes(seriesTmdbId);
-        items = data.items;
-        setEpisodeItems(items);
-        setEpisodeSeasons(data.seasons);
-      }
+  const ensureEpisodeItems = useCallback(async () => {
+    if (!seriesTmdbId) return episodeItems;
+    if (episodeItems.length) return episodeItems;
+    const data = await seriesEpisodes(seriesTmdbId);
+    setEpisodeItems(data.items);
+    setEpisodeSeasons(data.seasons);
+    return data.items;
+  }, [episodeItems, seriesTmdbId]);
+
+  const findAdjacentEpisode = useCallback(
+    (items: EpisodeListItem[], dir: -1 | 1): EpisodeListItem | undefined => {
       const s = identity?.seasonNumber;
       const e = identity?.episodeNumber;
-      if (s == null || e == null) {
-        setEpisodeBusy(false);
-        return;
-      }
+      if (s == null || e == null) return undefined;
       const idx = items.findIndex((ep) => ep.seasonNumber === s && ep.episodeNumber === e);
-      const next =
-        (idx >= 0 ? items[idx + 1] : null) ??
-        items.find((ep) => ep.seasonNumber === s && ep.episodeNumber === e + 1) ??
-        items.find((ep) => ep.seasonNumber === s + 1 && ep.episodeNumber === 1);
-      if (!next || !canPlayMedia(next)) {
-        setError("No next episode");
-        setEpisodeBusy(false);
-        return;
+      if (idx >= 0) {
+        const neighbor = items[idx + dir];
+        if (neighbor) return neighbor;
       }
-      // playEpisodeItem owns busy flag from here.
-      setEpisodeBusy(false);
-      await playEpisodeItem(next);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not play next episode");
-      setEpisodeBusy(false);
-    }
-  }, [
-    episodeBusy,
-    episodeItems,
-    identity?.episodeNumber,
-    identity?.seasonNumber,
-    isEpisodePlayback,
-    playEpisodeItem,
-    reveal,
-    seriesTmdbId,
-  ]);
+      if (dir > 0) {
+        return (
+          items.find((ep) => ep.seasonNumber === s && ep.episodeNumber === e + 1) ??
+          items.find((ep) => ep.seasonNumber === s + 1 && ep.episodeNumber === 1)
+        );
+      }
+      if (e > 1) {
+        return items.find((ep) => ep.seasonNumber === s && ep.episodeNumber === e - 1);
+      }
+      const priorSeason = items.filter((ep) => ep.seasonNumber === s - 1);
+      return priorSeason.length ? priorSeason[priorSeason.length - 1] : undefined;
+    },
+    [identity?.episodeNumber, identity?.seasonNumber],
+  );
+
+  const playAdjacentEpisode = useCallback(
+    async (dir: -1 | 1) => {
+      if (!isEpisodePlayback || !seriesTmdbId || episodeBusy) return;
+      reveal(true);
+      setEpisodeBusy(true);
+      setError(null);
+      const label = dir > 0 ? "next" : "previous";
+      try {
+        const items = await ensureEpisodeItems();
+        const target = findAdjacentEpisode(items, dir);
+        if (!target || !canPlayMedia(target)) {
+          setError(`No ${label} episode`);
+          setEpisodeBusy(false);
+          return;
+        }
+        // playEpisodeItem owns busy flag from here.
+        setEpisodeBusy(false);
+        await playEpisodeItem(target);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `Could not play ${label} episode`);
+        setEpisodeBusy(false);
+      }
+    },
+    [
+      ensureEpisodeItems,
+      episodeBusy,
+      findAdjacentEpisode,
+      isEpisodePlayback,
+      playEpisodeItem,
+      reveal,
+      seriesTmdbId,
+    ],
+  );
+
+  const playNextEpisode = useCallback(() => playAdjacentEpisode(1), [playAdjacentEpisode]);
+  const playPreviousEpisode = useCallback(() => playAdjacentEpisode(-1), [playAdjacentEpisode]);
 
   const openEpisodesMenu = useCallback(() => {
     if (!isEpisodePlayback) return;
@@ -917,7 +952,18 @@ export function PlayerScreen({
   const currentEpisodeIndex = episodeItems.findIndex((episode) =>
     episode.seasonNumber === identity?.seasonNumber && episode.episodeNumber === identity?.episodeNumber,
   );
-  const nextEpisode = currentEpisodeIndex >= 0 ? episodeItems[currentEpisodeIndex + 1] : undefined;
+  const previousEpisode =
+    currentEpisodeIndex >= 0
+      ? episodeItems[currentEpisodeIndex - 1]
+      : findAdjacentEpisode(episodeItems, -1);
+  const nextEpisode =
+    currentEpisodeIndex >= 0
+      ? episodeItems[currentEpisodeIndex + 1]
+      : findAdjacentEpisode(episodeItems, 1);
+  // Until the episode list loads, keep controls enabled so a tap can fetch + jump.
+  const canPlayPrevious =
+    !episodeItems.length || Boolean(previousEpisode && canPlayMedia(previousEpisode));
+  const canPlayNext = !episodeItems.length || Boolean(nextEpisode && canPlayMedia(nextEpisode));
   const canAutoplay = Boolean(nextEpisode && canPlayMedia(nextEpisode));
 
   useEffect(() => {
@@ -1351,6 +1397,36 @@ export function PlayerScreen({
                     </IconButton>
                   </>
                 ) : null}
+                {isEpisodePlayback ? (
+                  <>
+                    <IconButton
+                      onPress={() => void playPreviousEpisode()}
+                      label={
+                        episodeBusy
+                          ? "Loading previous episode"
+                          : canPlayPrevious
+                            ? "Previous episode"
+                            : "No previous episode"
+                      }
+                      disabled={episodeBusy || !canPlayPrevious}
+                    >
+                      <NfPreviousEpisodeIcon size={28} />
+                    </IconButton>
+                    <IconButton
+                      onPress={() => void playNextEpisode()}
+                      label={
+                        episodeBusy
+                          ? "Loading next episode"
+                          : canPlayNext
+                            ? "Next episode"
+                            : "No next episode"
+                      }
+                      disabled={episodeBusy || !canPlayNext}
+                    >
+                      <NfNextEpisodeIcon size={28} />
+                    </IconButton>
+                  </>
+                ) : null}
                 <IconButton onPress={toggleMute} label={muted ? "Unmute" : "Mute"}>
                   <NfVolumeIcon size={28} muted={muted} />
                 </IconButton>
@@ -1367,14 +1443,6 @@ export function PlayerScreen({
               </View>
 
               <View style={styles.rightActions}>
-                {isEpisodePlayback ? (
-                  <IconButton
-                    onPress={() => void playNextEpisode()}
-                    label={episodeBusy ? "Loading next episode" : "Next episode"}
-                  >
-                    <NfNextEpisodeIcon size={28} />
-                  </IconButton>
-                ) : null}
                 {isEpisodePlayback ? (
                   <IconButton onPress={openEpisodesMenu} label="Episodes">
                     <NfEpisodesIcon size={28} />
@@ -1722,6 +1790,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 40,
     minHeight: 40,
+  },
+  iconBtnDisabled: {
+    opacity: 0.35,
   },
   iconBtnLarge: {
     minWidth: 48,

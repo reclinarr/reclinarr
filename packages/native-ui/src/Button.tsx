@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import {
   Pressable,
   Text,
@@ -206,15 +206,14 @@ export function PillButton({
   const focusAllowed = useTvFocusAllowed();
   const [hovered, setHovered] = useState(false);
   const [pillFocused, setPillFocused] = useState(!!hasTVPreferredFocus || !!forceFocused);
-  const focusGen = useRef(0);
+  // Preferred-focus reclaim (Android restores native focus with no onFocus) is
+  // drawn via forceFocused / hasTVPreferredFocus from usePreferredFocusOnce —
+  // keep pillFocused in sync so we never need a blur grace period that leaves
+  // the previous pill lit while focus moves to a sibling.
   useEffect(() => {
-    if (forceFocused || hasTVPreferredFocus) {
-      focusGen.current += 1;
-      setPillFocused(true);
-    }
+    if (forceFocused || hasTVPreferredFocus) setPillFocused(true);
   }, [forceFocused, hasTVPreferredFocus]);
   const light = tone === "light";
-  const color = light ? "#000" : "#fff";
   const showProgress = progress !== undefined;
   const content = (fg: string) => (
     <>
@@ -243,18 +242,12 @@ export function PillButton({
       }
       ref={focusRef}
       onFocus={() => {
-        focusGen.current += 1;
         setPillFocused(true);
         onFocus?.();
       }}
       onBlur={() => {
-        const gen = focusGen.current;
         onBlur?.();
-        // Android often blurs the preferred pill then restores it with no
-        // focus event. Wait for reclaim before dropping the invert.
-        setTimeout(() => {
-          if (focusGen.current === gen) setPillFocused(false);
-        }, 400);
+        setPillFocused(false);
       }}
       onHoverIn={() => setHovered(true)}
       onHoverOut={() => setHovered(false)}
@@ -270,16 +263,20 @@ export function PillButton({
             focused && pillStyles.progressFocused,
           ];
         }
+        // TV focus ring: focused = solid white; idle = glass for every tone.
+        // Idle light used to stay white, which matched focused glass and made
+        // Resume / More Info look identical when the secondary had focus.
+        if (showFocusRing) {
+          return [
+            pillStyles.base,
+            focused ? pillStyles.focused : pillStyles.glass,
+            disabled && { opacity: 0.6 },
+          ];
+        }
         return [
           pillStyles.base,
-          focused && light
-            ? pillStyles.focusedLight
-            : focused
-              ? pillStyles.focused
-              : light
-                ? pillStyles.light
-                : pillStyles.glass,
-          (disabled || (hovered && !light && !focused)) && { opacity: disabled ? 0.6 : 0.88 },
+          light ? pillStyles.light : pillStyles.glass,
+          (disabled || (hovered && !light)) && { opacity: disabled ? 0.6 : 0.88 },
         ];
       }}
     >
@@ -296,8 +293,11 @@ export function PillButton({
             </>
           );
         }
-        const focused = showFocusRing && (isTvFocused(state) || pillFocused || !!forceFocused || !!hasTVPreferredFocus);
-        const fg = focused ? (light ? "#fff" : "#000") : color;
+        const focused =
+          showFocusRing &&
+          (isTvFocused(state) || pillFocused || !!forceFocused || !!hasTVPreferredFocus);
+        // TV: white pill → black label; glass idle → white label. Web keeps tone colors.
+        const fg = showFocusRing ? (focused ? "#000" : "#fff") : light ? "#000" : "#fff";
         return content(fg);
       }}
     </Pressable>
@@ -322,18 +322,6 @@ const pillStyles = StyleSheet.create({
   focused: {
     backgroundColor: "#fff",
     borderColor: "#111",
-    borderWidth: 3,
-    transform: [{ scale: 1.1 }],
-    shadowColor: "#fff",
-    shadowOpacity: 0.95,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
-  },
-  /** Idle light pills are already white — invert so focus is obvious on TV. */
-  focusedLight: {
-    backgroundColor: "#111",
-    borderColor: "#fff",
     borderWidth: 3,
     transform: [{ scale: 1.1 }],
     shadowColor: "#fff",
