@@ -17,11 +17,7 @@ export function AnalyticsConsentGate({ userId, screen, children, active = true }
       if (!cancelled) {
         setPrompt(available && consent === null);
         setReady(true);
-        if (available && consent === true) {
-          client.trackTelemetry("client.screen_view", {
-            screen,
-          });
-        }
+        if (available && consent === true) client.trackScreen(screen);
       }
     })();
     return () => {
@@ -45,9 +41,9 @@ export function AnalyticsConsentGate({ userId, screen, children, active = true }
               <Text style={styles.copy}>
                 Share pseudonymous performance and feature usage metrics with the Reclinarr team. We
                 collect operation names, timings, app version, and platform. We never send account
-                identifiers, titles, searches, or media identifiers. We use a random identifier to
-                group your opted-in metrics. You can change this any time from the account menu or
-                Profile settings.
+                identifiers, titles, searches, or media identifiers. We use random identifiers to
+                group your opted-in metrics by device and app session. You can change this any time
+                from the account menu or Profile settings.
               </Text>
               <Text style={styles.copy}>Metrics are sent to PostHog’s EU service.</Text>
               <View style={styles.actions}>
@@ -98,7 +94,7 @@ export function AnalyticsConsentSettings({ userId }: { userId: string }) {
           ? consent === true
             ? "Enabled. Performance and feature usage metrics are shared."
             : "Disabled. No usage metrics are shared."
-          : "Metrics are not configured for this server."}
+          : "Metrics are turned off on this server."}
       </Text>
       {available ? (
         <ConsentButton

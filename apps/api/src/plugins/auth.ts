@@ -20,10 +20,7 @@ function sessionIdFromRequest(req: FastifyRequest): string | undefined {
   const query = req.query as Record<string, unknown> | undefined;
   const fromQuery = query?.[SESSION_COOKIE];
   if (typeof fromQuery === "string" && fromQuery.trim()) return fromQuery.trim();
-  const raw = req.headers.cookie;
-  if (!raw) return undefined;
-  const part = raw.split(";").map((s) => s.trim()).find((s) => s.startsWith(`${SESSION_COOKIE}=`));
-  return part?.slice(SESSION_COOKIE.length + 1) || undefined;
+  return undefined;
 }
 
 function toUserContext(session: SessionRecord): UserContext {
@@ -59,4 +56,23 @@ export async function requireAuth(req: FastifyRequest): Promise<{
     throw err;
   }
   return { session: req.session, userContext: req.userContext };
+}
+
+export function isDemoSession(ctx: AppContext, session: SessionRecord): boolean {
+  const username = session.jellyfinUsername.toLowerCase();
+  return ctx.config.RECLINARR_DEMO_USERS.split(",").some(
+    (entry) => entry.trim().toLowerCase() === username,
+  );
+}
+
+/** `requireAuth` that also refuses demo accounts (requests and IPTV downloads). */
+export async function requireFullAccess(
+  ctx: AppContext,
+  req: FastifyRequest,
+): Promise<{ session: SessionRecord; userContext: UserContext }> {
+  const auth = await requireAuth(req);
+  if (isDemoSession(ctx, auth.session)) {
+    throw Object.assign(new Error("Not available on the demo account"), { statusCode: 403 });
+  }
+  return auth;
 }

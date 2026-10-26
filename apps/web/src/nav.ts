@@ -32,5 +32,5 @@ export type RootStackParamList = {
   Requests: undefined;
   Details: DetailsParams;
   Player: PlayParams;
-  Profile: undefined;
+  Settings: undefined;
 };

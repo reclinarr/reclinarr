@@ -9,3 +9,4 @@ export * from "./episodes.js";
 export * from "./capabilities.js";
 export * from "./errors.js";
 export * from "./availability-resolver.js";
+export * from "./telemetry.js";

@@ -204,6 +204,26 @@ export class IptvProgressStore {
     }));
   }
 
+  /** Episodes of a series the user has finished (any provider). */
+  listCompletedForSeries(
+    userId: string,
+    seriesTmdbId: number,
+  ): Array<{ seasonNumber: number; episodeNumber: number }> {
+    return this.db
+      .select()
+      .from(playbackProgress)
+      .where(and(eq(playbackProgress.userId, userId), eq(playbackProgress.completed, true)))
+      .all()
+      .filter(
+        (r) =>
+          r.mediaType === "episode" &&
+          r.tmdbId === seriesTmdbId &&
+          r.seasonNumber != null &&
+          r.episodeNumber != null,
+      )
+      .map((r) => ({ seasonNumber: r.seasonNumber!, episodeNumber: r.episodeNumber! }));
+  }
+
   listContinue(userId: string, limit = 20): Media[] {
     const rows = this.db
       .select()

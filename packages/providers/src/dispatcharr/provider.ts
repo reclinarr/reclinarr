@@ -117,6 +117,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   /** Positive hits and confirmed misses only — never transient errors. */
   private readonly tmdbCache = new Map<string, { at: number; media: Media | null }>();
   private static readonly TMDB_CACHE_TTL_MS = 10 * 60_000;
+  private static readonly TMDB_CACHE_MAX_ENTRIES = 2000;
   private groupsCache?: { at: number; items: LiveChannelGroup[] };
   private channelsCache?: { at: number; items: LiveChannel[] };
 
@@ -326,7 +327,12 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
           ? await this.findMovieByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages, reference)
           : await this.findSeriesByTmdb(tmdbId, opts?.titleHint, opts?.yearHint, languages, reference);
       });
+      this.tmdbCache.delete(cacheKey);
       this.tmdbCache.set(cacheKey, { at: Date.now(), media });
+      if (this.tmdbCache.size > DispatcharrProvider.TMDB_CACHE_MAX_ENTRIES) {
+        const oldest = this.tmdbCache.keys().next().value;
+        if (oldest !== undefined) this.tmdbCache.delete(oldest);
+      }
       return media;
     } catch (err) {
       if (err instanceof ProviderError && err.code === "unauthorized") throw err;

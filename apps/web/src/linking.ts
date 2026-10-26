@@ -20,7 +20,7 @@ export const linkingConfig = {
     Live: "live",
     Downloads: "downloads",
     Requests: "requests",
-    Profile: "profile",
+    Settings: "settings",
     // Parsed manually in getStateFromPath so we can stack Home underneath.
     Details: "media/:type/:tmdbId",
     Player: "play",
@@ -190,6 +190,10 @@ export const webLinking: LinkingOptions<RootStackParamList> = {
         ],
         index: 0,
       };
+    }
+
+    if (clean === "profile") {
+      return { routes: [{ name: "Settings" }], index: 0 };
     }
 
     // Bare /play with no identity — browse home.

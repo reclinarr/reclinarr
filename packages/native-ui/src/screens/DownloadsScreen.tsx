@@ -8,12 +8,12 @@ import {
   listAcquisitions,
   mediaByJellyfin,
   mediaByTmdb,
-  promoteAcquisition,
 } from "@reclinarr/client";
 import { Artwork } from "../Artwork.js";
 import { Button } from "../Button.js";
 import { isTvFocused, tvFocusHighlight } from "../focus.js";
 import { DownloadListSkeleton } from "../Skeleton.js";
+import { AccentFill } from "../AccentFill.js";
 import { colors } from "../theme.js";
 import { measureAndScrollIntoView } from "../tvScroll.js";
 import { webBg } from "../webStyle.js";
@@ -36,7 +36,7 @@ function DownloadRow({ item, nav, tv, onFocus }: {
     staleTime: 60_000,
   });
   const action = useMutation({
-    mutationFn: (kind: "cancel" | "promote") => kind === "cancel" ? cancelAcquisition(item.id) : promoteAcquisition(item.id),
+    mutationFn: () => cancelAcquisition(item.id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["acquisitions"] });
       void queryClient.invalidateQueries({ queryKey: ["media"] });
@@ -51,9 +51,10 @@ function DownloadRow({ item, nav, tv, onFocus }: {
     : item.totalBytes && item.totalBytes > 0
       ? Math.min(99, Math.round(item.bytesDownloaded / item.totalBytes * 100)) : null;
   const ttl = formatCacheTtlRemaining(item.cacheExpiresAt);
-  const status = item.state === "playable" ? "Downloading · Ready to play"
+  const status = item.state === "playable" ? "Caching · Ready to play"
     : item.state === "completed" ? "Ready to play"
-      : item.state.charAt(0).toUpperCase() + item.state.slice(1);
+      : item.state === "downloading" ? "Caching"
+        : item.state.charAt(0).toUpperCase() + item.state.slice(1);
 
   return (
     <View>
@@ -80,16 +81,14 @@ function DownloadRow({ item, nav, tv, onFocus }: {
           {active ? (
             <>
               <Text style={styles.meta}>{Math.round(item.bytesDownloaded / 1_000_000)} MB{item.totalBytes ? ` of ${Math.round(item.totalBytes / 1_000_000)} MB` : ""}</Text>
-              {percent != null ? <View style={styles.progress}><View style={[styles.progressFill, { width: `${percent}%` }]} /></View> : null}
+              {percent != null ? <View style={styles.progress}><View style={[styles.progressFill, { width: `${percent}%` }]}><AccentFill /></View></View> : null}
             </>
           ) : null}
         </View>
       </Pressable>
       <View style={styles.actions}>
-        {item.state === "completed" && item.mode === "cache" ? (
-          <Button label="Add to library" variant="ghost" onPress={() => action.mutate("promote")} disabled={action.isPending} showFocusRing={tv} />
-        ) : active ? (
-          <Button label="Cancel download" variant="ghost" onPress={() => action.mutate("cancel")} disabled={action.isPending} showFocusRing={tv} />
+        {active ? (
+          <Button label="Stop caching" variant="ghost" onPress={() => action.mutate()} disabled={action.isPending} showFocusRing={tv} />
         ) : null}
       </View>
       {action.error ? <Text accessibilityRole="alert" style={styles.error}>{action.error.message}</Text> : null}
@@ -114,7 +113,7 @@ export function DownloadsScreen({ nav, header, focusMode = "touch" }: Pick<Scree
         onScroll={(event) => { offset.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={16}>
         {query.isLoading ? <DownloadListSkeleton rows={5} /> : null}
         {query.error ? <><Text accessibilityRole="alert" style={styles.error}>{query.error.message}</Text><Button label="Try again" onPress={() => void query.refetch()} showFocusRing={tv} /></> : null}
-        {query.isSuccess && !query.data.items.length ? <Text style={styles.empty}>No downloads yet.</Text> : null}
+        {query.isSuccess && !query.data.items.length ? <Text style={styles.empty}>Nothing cached yet.</Text> : null}
         {(query.data?.items ?? []).map((item) => (
           <DownloadRow key={item.id} item={item} nav={nav} tv={tv}
             onFocus={(view) => { if (tv) measureAndScrollIntoView(view, scroll, offset, height); }} />
@@ -137,6 +136,6 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, marginTop: 4, fontSize: 13 },
   actions: { flexDirection: "row", paddingHorizontal: 8, paddingBottom: 8 },
   progress: { height: 3, marginTop: 8, backgroundColor: colors.bg2 },
-  progressFill: { height: 3, backgroundColor: colors.accent },
+  progressFill: { height: 3, backgroundColor: colors.accent, overflow: "hidden" },
   error: { color: colors.danger, marginVertical: 8 },
 });

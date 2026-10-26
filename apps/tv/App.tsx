@@ -2,7 +2,7 @@ import { type JSX, useEffect } from "react";
 import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { me } from "@reclinarr/client";
+import { me, syncPreferences } from "@reclinarr/client";
 import { StatusBar } from "expo-status-bar";
 import type { Nav, RootStackParamList } from "./src/nav";
 import { attachClient, loadServerUrl } from "./src/session";
@@ -41,6 +41,7 @@ function BootScreen() {
       attachClient(url);
       try {
         await me();
+        void syncPreferences().catch((err) => console.error("[preferences] sync failed", err));
         navigation.reset({ index: 0, routes: [{ name: "Home" }] });
       } catch {
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });

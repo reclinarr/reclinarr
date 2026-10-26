@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../context.js";
 import { sessionCookieSecure } from "../config.js";
-import { requireAuth } from "../plugins/auth.js";
+import { isDemoSession, requireAuth } from "../plugins/auth.js";
 import { SESSION_COOKIE } from "../services/session.js";
 import { JellyfinProvider, MockJellyfinProvider } from "@reclinarr/providers";
 import { createHash } from "node:crypto";
@@ -85,6 +85,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
         user: {
           id: session.jellyfinUserId,
           username: session.jellyfinUsername,
+          demo: isDemoSession(ctx, session),
         },
         sessionId: session.id,
       };
@@ -92,8 +93,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
   );
 
   app.post("/api/auth/logout", async (req, reply) => {
-    const sid = req.cookies[SESSION_COOKIE];
-    if (sid) await ctx.sessions.destroy(sid);
+    if (req.session) await ctx.sessions.destroy(req.session.id);
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { ok: true };
   });
@@ -104,6 +104,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
       user: {
         id: session.jellyfinUserId,
         username: session.jellyfinUsername,
+        demo: isDemoSession(ctx, session),
       },
       mocks: ctx.useMocks,
     };

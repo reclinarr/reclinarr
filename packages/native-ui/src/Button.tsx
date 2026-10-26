@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import { isTvFocused, tvFocusFill, tvFocusRingOnLight, useTvFocusAllowed } from "./focus.js";
 import { DownloadIcon, PlayIcon } from "./icons.js";
+import { SkeletonBlock } from "./Skeleton.js";
+import { AccentFill } from "./AccentFill.js";
 import { colors } from "./theme.js";
 
 /**
@@ -69,6 +71,8 @@ export function Button({
   hasTVPreferredFocus,
   focusable,
   progress,
+  loading = false,
+  busy = false,
   ...rest
 }: PressableProps & {
   label: string;
@@ -79,18 +83,28 @@ export function Button({
   focusedStyle?: StyleProp<ViewStyle>;
   /** Turns the button into a progress bar (0–100; null = track only, size not known yet). */
   progress?: number | null;
+  /** Skeleton placeholder sized to `label` while the button's action isn't known yet. */
+  loading?: boolean;
+  /** Dimmed and ignores presses while its action runs, but stays focusable (TV skips disabled views). */
+  busy?: boolean;
 }) {
   const focusAllowed = useTvFocusAllowed();
-  const showProgress = progress !== undefined;
+  const showProgress = progress !== undefined && !loading;
+  const inert = loading || busy;
   return (
     <Pressable
       {...rest}
+      onPress={inert ? undefined : rest.onPress}
       focusable={focusAllowed && focusable !== false}
       hasTVPreferredFocus={focusAllowed ? hasTVPreferredFocus : undefined}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={loading ? "Loading" : label}
+      accessibilityState={inert ? { ...rest.accessibilityState, busy: true, disabled: true } : rest.accessibilityState}
       style={(state) => {
         const focused = showFocusRing && isTvFocused(state);
+        if (loading) {
+          return [styles.base, styles.skeleton, focused && styles.progressFocused, typeof style === "function" ? style(state) : style];
+        }
         // Primary is already a light fill — use a dark ring so focus is visible.
         // Progress keeps its dark track on focus so the fill stays visible.
         const focusChrome = showProgress
@@ -106,12 +120,21 @@ export function Button({
           !showProgress && variant === "danger" && styles.danger,
           !showProgress && variant === "accent" && styles.accent,
           state.pressed && styles.pressed,
+          busy && styles.busy,
           focused ? [focusChrome, focusedStyle] : null,
           typeof style === "function" ? style(state) : style,
         ];
       }}
     >
       {(state) => {
+        if (loading) {
+          return (
+            <>
+              <Text style={[styles.label, styles.labelHidden]}>{label}</Text>
+              <SkeletonBlock radius={8} style={skeletonFill.fill} />
+            </>
+          );
+        }
         if (showProgress) {
           return (
             <>
@@ -129,18 +152,21 @@ export function Button({
         const focused = showFocusRing && isTvFocused(state);
         const invertLabel = focused && variant !== "primary";
         return (
-          <Text
-            style={[
-              styles.label,
-              variant === "primary" && styles.labelOnPrimary,
-              variant === "ghost" && styles.labelGhost,
-              variant === "danger" && styles.labelOnPrimary,
-              variant === "accent" && styles.labelOnAccent,
-              invertLabel ? styles.labelFocused : null,
-            ]}
-          >
-            {label}
-          </Text>
+          <>
+            {variant === "accent" && !focused ? <AccentFill style={styles.accentFill} /> : null}
+            <Text
+              style={[
+                styles.label,
+                variant === "primary" && styles.labelOnPrimary,
+                variant === "ghost" && styles.labelGhost,
+                variant === "danger" && styles.labelOnPrimary,
+                variant === "accent" && styles.labelOnAccent,
+                invertLabel ? styles.labelFocused : null,
+              ]}
+            >
+              {label}
+            </Text>
+          </>
         );
       }}
     </Pressable>
@@ -161,11 +187,15 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: colors.text },
   ghost: { backgroundColor: colors.bg2 },
   danger: { backgroundColor: colors.danger },
-  accent: { backgroundColor: colors.accent, borderRadius: 4 },
+  accent: { backgroundColor: colors.accent, borderRadius: 4, overflow: "hidden" },
+  accentFill: { top: -2, left: -2, right: -2, bottom: -2 },
   pressed: { opacity: 0.85 },
+  busy: { opacity: 0.6 },
+  skeleton: { overflow: "hidden" },
   label: { fontSize: 15, fontWeight: "700" },
+  labelHidden: { color: "transparent" },
   labelOnPrimary: { color: colors.bg },
-  labelOnAccent: { color: colors.bg },
+  labelOnAccent: { color: colors.text },
   labelGhost: { color: colors.text },
   labelFocused: { color: colors.bg },
   progressTrack: { backgroundColor: colors.bg2, overflow: "hidden", minWidth: 160 },
@@ -187,6 +217,8 @@ export function PillButton({
   onFocus,
   onBlur,
   progress,
+  loading = false,
+  busy = false,
 }: {
   label: string;
   icon?: "play" | "info" | "download";
@@ -202,6 +234,10 @@ export function PillButton({
   onBlur?: () => void;
   /** Turns the pill into a progress bar (0–100; null = track only, size not known yet). */
   progress?: number | null;
+  /** Skeleton placeholder sized to `label` and `icon` while the pill's action isn't known yet. */
+  loading?: boolean;
+  /** Dimmed and ignores presses while its action runs, but stays focusable (TV skips disabled views). */
+  busy?: boolean;
 }) {
   const focusAllowed = useTvFocusAllowed();
   const [hovered, setHovered] = useState(false);
@@ -214,7 +250,8 @@ export function PillButton({
     if (forceFocused || hasTVPreferredFocus) setPillFocused(true);
   }, [forceFocused, hasTVPreferredFocus]);
   const light = tone === "light";
-  const showProgress = progress !== undefined;
+  const showProgress = progress !== undefined && !loading;
+  const inert = loading || busy;
   const content = (fg: string) => (
     <>
       {icon === "play" ? <PlayIcon color={fg} size={22} /> : null}
@@ -232,11 +269,12 @@ export function PillButton({
   return (
     <Pressable
       disabled={disabled}
-      onPress={onPress}
+      onPress={inert ? undefined : onPress}
       focusable={focusAllowed}
       hasTVPreferredFocus={focusAllowed ? hasTVPreferredFocus : undefined}
       accessibilityRole={showProgress ? "progressbar" : "button"}
-      accessibilityLabel={label}
+      accessibilityLabel={loading ? "Loading" : label}
+      accessibilityState={inert ? { busy: true, disabled: true } : undefined}
       accessibilityValue={
         showProgress && progress != null ? { min: 0, max: 100, now: Math.round(progress) } : undefined
       }
@@ -255,11 +293,15 @@ export function PillButton({
         const focused =
           showFocusRing &&
           (isTvFocused(state) || pillFocused || !!forceFocused || !!hasTVPreferredFocus);
+        if (loading) {
+          return [pillStyles.base, pillStyles.skeleton, focused && pillStyles.progressFocused];
+        }
         if (showProgress) {
           return [
             pillStyles.base,
             pillStyles.progressTrack,
             hovered && { opacity: 0.88 },
+            busy && pillStyles.busy,
             focused && pillStyles.progressFocused,
           ];
         }
@@ -270,17 +312,25 @@ export function PillButton({
           return [
             pillStyles.base,
             focused ? pillStyles.focused : pillStyles.glass,
-            disabled && { opacity: 0.6 },
+            (disabled || busy) && pillStyles.busy,
           ];
         }
         return [
           pillStyles.base,
           light ? pillStyles.light : pillStyles.glass,
-          (disabled || (hovered && !light)) && { opacity: disabled ? 0.6 : 0.88 },
+          (disabled || busy || (hovered && !light)) && { opacity: disabled || busy ? 0.6 : 0.88 },
         ];
       }}
     >
       {(state) => {
+        if (loading) {
+          return (
+            <>
+              {content("transparent")}
+              <SkeletonBlock radius={999} style={skeletonFill.fill} />
+            </>
+          );
+        }
         if (showProgress) {
           return (
             <>
@@ -319,6 +369,8 @@ const pillStyles = StyleSheet.create({
   },
   light: { backgroundColor: "#fff" },
   glass: { backgroundColor: "rgba(128, 128, 128, 0.4)" },
+  busy: { opacity: 0.6 },
+  skeleton: { overflow: "hidden" },
   focused: {
     backgroundColor: "#fff",
     borderColor: "#111",
@@ -355,4 +407,8 @@ const pillStyles = StyleSheet.create({
     justifyContent: "center",
   },
   infoText: { fontSize: 12, fontWeight: "700", lineHeight: 14 },
+});
+
+const skeletonFill = StyleSheet.create({
+  fill: { ...StyleSheet.absoluteFill, width: "100%", height: "100%" },
 });

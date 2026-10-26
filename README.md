@@ -58,12 +58,15 @@ Opt-in performance metrics are configured in [docs/performance-telemetry.md](./d
 ## Quick start (development)
 
 ```bash
-cp .env.example .env
-# set JELLYFIN_URL, SEERR_*, DISPATCHARR_*, RECLINARR_SESSION_SECRET
-
-npm install
-npm run dev
+make setup   # npm install + library build
+make dev     # API + web + library watchers; Ctrl-C stops everything
 ```
+
+Configure Jellyfin, Seerr, and Dispatcharr in the setup wizard. Values in a root
+`.env` (see `.env.example`) override the wizard, so only copy the keys you need.
+`make dev-mock` runs without backends.
+
+Run `make` to list every target.
 
 - Web: http://localhost:5173
 - API: http://localhost:8787
@@ -74,22 +77,19 @@ From a local checkout:
 
 ```bash
 cp .env.example .env
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
 Build the image straight from GitHub (Dockerfile at repo root):
 
 ```bash
 docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
-docker run --env-file .env -p 8787:8787 reclinarr
+docker run --init --env-file .env -p 8787:8787 -v reclinarr-data:/data reclinarr
 ```
 
-Or compose with a Git build context (still needs a local `.env` for secrets):
+Or compose with a Git build context, no checkout needed: put [`docker/docker-compose.git.yml`](./docker/docker-compose.git.yml) and a `.env` in one folder and run `docker compose -f docker-compose.git.yml up -d --build` there.
 
-```bash
-cp .env.example .env
-docker compose -f docker/docker-compose.git.yml up -d --build
-```
+The container runs as uid/gid 1000. If `/data` is a host bind mount owned by someone else, set `PUID`/`PGID` to that owner.
 
 Compose runs **Reclinarr only**. Point env vars at your existing Jellyfin / Seerr / Dispatcharr instances. The Docker image includes **nginx** (media plane), **ffmpeg** (HLS packager), and the API in one container.
 
@@ -112,6 +112,8 @@ See [`.env.example`](./.env.example).
 | `RECLINARR_HWACCEL` | Live encoder: `auto` (default), `off`, `nvenc`, `qsv`, `vaapi`, `videotoolbox` |
 | `RECLINARR_VAAPI_DEVICE` | VAAPI/QSV render node (default: first `/dev/dri/renderD*`) |
 | `RECLINARR_MEDIA_PLANE` | `node` (local) or `nginx` (Docker) |
+| `PUID` / `PGID` | Docker only: uid/gid the container runs as (default 1000) |
+| `RECLINARR_TRUSTED_PROXIES` | Reverse proxies in front of Reclinarr (IPs/CIDRs) trusted for client IPs |
 | `JELLYFIN_URL` | Jellyfin base URL |
 | `SEERR_URL` / `SEERR_API_KEY` | Seerr |
 | `DISPATCHARR_URL` / `DISPATCHARR_API_KEY` | Dispatcharr |
@@ -134,16 +136,14 @@ guidelines. Canonical repo: [reclinarr/reclinarr](https://github.com/reclinarr/r
 ## Development
 
 ```bash
-npm run build
-npm test
-npm run typecheck
-npm run lint
+make build
+make check   # typecheck + lint + test
 ```
 
 Live Dispatcharr ranking checks are opt-in and use the credentials in `.env`:
 
 ```bash
-npm run test:live -w @reclinarr/providers
+make test-live
 ```
 
 Primary validation targets are web, the iOS Simulator, and the Google TV emulator.
@@ -153,10 +153,12 @@ segments are available; locally ready titles play from Jellyfin or the existing 
 Run the native Metro servers on separate ports when testing both emulators:
 
 ```bash
-npm run start -w @reclinarr/mobile -- --port 8081
-npm run start -w @reclinarr/tv -- --port 8082
-adb reverse tcp:8081 tcp:8082
+make mobile        # :8081
+make tv            # :8082
+make adb-reverse   # adb reverse tcp:8081 tcp:8082
 ```
+
+`make ios`, `make android` and `make tv-android` build and launch the dev builds.
 
 The TV emulator's default `localhost:8081` now reaches the TV Metro server on
 host port 8082, while the iOS Simulator continues to use host port 8081 directly.
@@ -175,9 +177,9 @@ active connection.
 Run each platform suite with:
 
 ```bash
-npm run test:e2e:web
-npm run test:e2e:ios -- --udid <IOS_SIMULATOR_UDID>
-npm run test:e2e:tv -- --udid <TV_EMULATOR_UDID>
+make e2e-web
+make e2e-ios UDID=<IOS_SIMULATOR_UDID>
+make e2e-tv UDID=<TV_EMULATOR_UDID>
 ```
 
 The web flow signs in using `RECLINARR_TEST_USERNAME` and

@@ -180,4 +180,31 @@ describe("mergeSeriesEpisodes", () => {
       items[1]?.availability.find((a) => a.provider === "dispatcharr")?.canPlay,
     ).toBe(false);
   });
+  it("keeps Jellyfin's played flag on episodes never started in Reclinarr", () => {
+    const { items } = mergeSeriesEpisodes(5920, {
+      guide: [
+        episode({
+          season: 1,
+          episode: 1,
+          title: "Pilot",
+          availability: [{ provider: "seerr", requestable: false, mediaStatus: "AVAILABLE" }],
+        }),
+      ],
+      jellyfin: [
+        episode({
+          season: 1,
+          episode: 1,
+          title: "Pilot",
+          jellyfinItemId: "jf-1",
+          availability: [
+            { provider: "jellyfin", available: true, canPlay: true, itemId: "jf-1", played: true },
+          ],
+        }),
+      ],
+      iptv: [],
+    });
+    expect(items[0]?.availability.find((a) => a.provider === "jellyfin")).toMatchObject({
+      played: true,
+    });
+  });
 });

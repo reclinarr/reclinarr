@@ -11,13 +11,27 @@ import type {
   PlaybackSource,
   SubtitleTrack,
 } from "@reclinarr/shared";
+import { POSTHOG_PROJECT_KEY } from "@reclinarr/shared";
 import { loadAudioLanguagePref } from "./audio-pref.js";
+import type {
+  AdminServicesResponse,
+  ServiceEdit,
+  ServiceId,
+  ServiceTestResult,
+} from "./admin.js";
+import {
+  isDefaultPreferences,
+  loadLocalPreferences,
+  saveLocalPreferences,
+  type PreferencesResponse,
+  type UserPreferences,
+} from "./preferences.js";
 import { BW_PROBE_CACHE_KEY, type KeyValueStorage } from "./storage.js";
 import { sessionCookieHeader, withCatalogueDuration } from "./playback.js";
 import { SESSION_COOKIE } from "./session.js";
 
 export interface LoginResult {
-  user: { id: string; username: string };
+  user: { id: string; username: string; demo?: boolean };
   sessionId?: string;
 }
 
@@ -30,7 +44,6 @@ export interface ReclinarrClientOptions {
   setSessionId?: (id: string | null) => void | Promise<void>;
   storage?: KeyValueStorage;
   appVersion?: string;
-  posthogProjectKey?: string;
 }
 
 const PLAY_BUFFER_POLL_MS = 500;
@@ -43,15 +56,41 @@ const BW_MAX = 20_000_000;
 const POSTHOG_BATCH_URL = "https://eu.i.posthog.com/batch/";
 const TELEMETRY_EVENTS = new Set([
   "client.api_operation",
-  "client.screen_view",
   "client.playback_milestone",
   "client.artwork_result",
+  "client.feature_used",
 ]);
 const TELEMETRY_PROPERTIES: Record<string, Set<string>> = {
-  "client.api_operation": new Set(["operation", "duration_ms", "outcome", "platform", "app_version"]),
-  "client.screen_view": new Set(["screen", "platform", "app_version"]),
-  "client.playback_milestone": new Set(["milestone", "duration_ms", "media_kind", "platform", "app_version"]),
-  "client.artwork_result": new Set(["duration_ms", "outcome", "platform", "app_version"]),
+  "client.api_operation": new Set(["operation", "duration_ms", "outcome"]),
+  "client.playback_milestone": new Set(["milestone", "duration_ms", "media_kind", "watched_s", "stall_count"]),
+  "client.artwork_result": new Set(["duration_ms", "outcome"]),
+  "client.feature_used": new Set(["feature"]),
+};
+export const TELEMETRY_FEATURES = [
+  "request",
+  "download",
+  "my_list_add",
+  "my_list_remove",
+  "live_favourite",
+  "live_tune",
+  "live_zap",
+  "subtitle_change",
+  "audio_language_change",
+  "next_episode",
+  "autoplay_next",
+] as const;
+export type TelemetryFeature = (typeof TELEMETRY_FEATURES)[number];
+// Mirrors posthog-js session rotation so web, native and server events agree on session length.
+const TELEMETRY_SESSION_IDLE_MS = 30 * 60_000;
+const TELEMETRY_SESSION_MAX_MS = 24 * 60 * 60_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+type TelemetrySession = { id: string; startedAt: number; lastActivityAt: number };
+type TelemetryDevice = {
+  platform: "web" | "ios" | "android";
+  $device_type: "TV" | "Tablet" | "Mobile" | "Desktop";
+  $os?: "iOS" | "tvOS" | "Android";
+  $os_version?: string;
 };
 
 function safeExceptionMessage(error: unknown): { type: string; value: string; stacktrace?: { frames: Array<{ filename: string; lineno?: number; function?: string }> } } {
@@ -73,6 +112,75 @@ function createAnonymousId(): string {
   return `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
+/** PostHog derives session start from the UUIDv7 timestamp, so `$session_id` must be v7. */
+export function uuidv7(now = Date.now()): string {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let ts = now;
+  for (let i = 5; i >= 0; i--) {
+    bytes[i] = ts % 256;
+    ts = Math.floor(ts / 256);
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function parseTelemetrySession(raw: string | null | undefined): TelemetrySession | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<TelemetrySession>;
+    if (
+      typeof value.id === "string" && UUID_RE.test(value.id) &&
+      typeof value.startedAt === "number" && Number.isFinite(value.startedAt) &&
+      typeof value.lastActivityAt === "number" && Number.isFinite(value.lastActivityAt)
+    ) {
+      return { id: value.id, startedAt: value.startedAt, lastActivityAt: value.lastActivityAt };
+    }
+  } catch {
+    /* corrupt entry: start a new session */
+  }
+  return null;
+}
+
+let cachedTelemetryDevice: TelemetryDevice | null = null;
+
+/** Metro and Expo set `__DEV__` for dev servers; release and exported builds leave it false. */
+function telemetryEnvironment(): "development" | "production" {
+  return (globalThis as { __DEV__?: unknown }).__DEV__ === true ? "development" : "production";
+}
+
+function telemetryDevice(): TelemetryDevice {
+  if (cachedTelemetryDevice) return cachedTelemetryDevice;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Platform } = require("react-native") as {
+      Platform?: { OS?: string; isTV?: boolean; isPad?: boolean; Version?: string | number };
+    };
+    if (Platform?.OS === "ios" || Platform?.OS === "android") {
+      const tv = Platform.isTV === true;
+      cachedTelemetryDevice = {
+        platform: Platform.OS,
+        $device_type: tv ? "TV" : Platform.isPad ? "Tablet" : "Mobile",
+        $os: Platform.OS === "android" ? "Android" : tv ? "tvOS" : "iOS",
+        ...(Platform.Version != null ? { $os_version: String(Platform.Version).slice(0, 32) } : {}),
+      };
+      return cachedTelemetryDevice;
+    }
+  } catch {
+    /* web / node */
+  }
+  const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  cachedTelemetryDevice = { platform: "web", $device_type: coarse ? "Mobile" : "Desktop" };
+  return cachedTelemetryDevice;
+}
+
 function monotonicNow(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
@@ -85,13 +193,12 @@ function isSafeTelemetryEvent(event: string, properties: Record<string, unknown>
   return Object.entries(properties).every(([key, value]) => {
     if (!allowed.has(key)) return false;
     if (key === "duration_ms") return typeof value === "number" && Number.isFinite(value) && value >= 0;
-    if (key === "platform") return value === "web" || value === "ios" || value === "android";
-    if (key === "app_version") return typeof value === "string" && /^[0-9A-Za-z.+-]{1,32}$/.test(value);
+    if (key === "watched_s" || key === "stall_count") return Number.isInteger(value) && (value as number) >= 0;
     if (key === "outcome") return value === "success" || value === "failure";
     if (key === "operation") return typeof value === "string" && /^[a-z_]{2,40}$/.test(value);
-    if (key === "screen") return typeof value === "string" && /^[a-z_]{2,32}$/.test(value);
     if (key === "milestone") return typeof value === "string" && /^[a-z_]{2,32}$/.test(value);
     if (key === "media_kind") return value === "vod" || value === "live";
+    if (key === "feature") return (TELEMETRY_FEATURES as readonly unknown[]).includes(value);
     return false;
   });
 }
@@ -173,12 +280,14 @@ export class ReclinarrClient {
   private telemetryDistinctId: string | null = null;
   private telemetryEnabled = false;
   private telemetryAvailable: boolean | null = null;
-  private readonly telemetryProjectKey: string | null;
   private telemetryStatusCheckedAt = 0;
   private telemetryQueue: Array<{ event: string; properties: Record<string, unknown>; queuedAt: number }> = [];
   private telemetryFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private telemetryFlushing = false;
   private telemetryGeneration = 0;
+  private telemetrySession: TelemetrySession | null = null;
+  private telemetrySessionKey: string | null = null;
+  private telemetrySessionSavedAt = 0;
 
   constructor(opts: ReclinarrClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
@@ -188,7 +297,6 @@ export class ReclinarrClient {
     this.setSessionId = opts.setSessionId;
     this.storage = opts.storage;
     this.appVersion = opts.appVersion ?? "0.1.0";
-    this.telemetryProjectKey = opts.posthogProjectKey?.trim() || null;
   }
 
   url(path: string): string {
@@ -220,13 +328,12 @@ export class ReclinarrClient {
   }
 
   analyticsActive(): boolean {
-    return this.telemetryAvailable === true && Boolean(this.telemetryProjectKey) &&
-      this.telemetryEnabled && Boolean(this.telemetryDistinctId);
+    return this.telemetryAvailable === true && this.telemetryEnabled && Boolean(this.telemetryDistinctId);
   }
 
   async analyticsStatus(): Promise<boolean> {
     if (this.telemetryAvailable !== null && Date.now() - this.telemetryStatusCheckedAt < 60_000) {
-      return this.telemetryAvailable && Boolean(this.telemetryProjectKey);
+      return this.telemetryAvailable;
     }
     try {
       const response = await this.fetchImpl(this.url("/api/telemetry/status"), {
@@ -240,7 +347,7 @@ export class ReclinarrClient {
     } catch {
       // Leave unknown so a transient startup network error can be retried later.
     }
-    return this.telemetryAvailable === true && Boolean(this.telemetryProjectKey);
+    return this.telemetryAvailable === true;
   }
 
   async setAnalyticsConsent(userId: string, enabled: boolean): Promise<void> {
@@ -256,10 +363,16 @@ export class ReclinarrClient {
           await this.storage?.setItem(`${key}.id`, distinctId);
         }
       }
+      if (enabled && this.telemetrySessionKey !== `${key}.session`) {
+        this.telemetrySessionKey = `${key}.session`;
+        this.telemetrySession = parseTelemetrySession(await this.storage?.getItem(this.telemetrySessionKey));
+        this.telemetrySessionSavedAt = this.telemetrySession?.lastActivityAt ?? 0;
+      }
       this.telemetryEnabled = enabled;
       this.telemetryDistinctId = distinctId;
       if (!enabled) {
         await this.storage?.removeItem?.(`${key}.id`);
+        await this.storage?.removeItem?.(`${key}.session`);
         this.clearActiveTelemetry();
       }
     } catch {
@@ -279,11 +392,47 @@ export class ReclinarrClient {
 
   trackTelemetry(event: string, properties: Record<string, unknown> = {}) {
     if (!this.analyticsActive() || !isSafeTelemetryEvent(event, properties)) return;
+    this.enqueueTelemetry(event, properties);
+  }
+
+  trackFeature(feature: TelemetryFeature) {
+    this.trackTelemetry("client.feature_used", { feature });
+  }
+
+  /** Native screens use `$screen`; web uses `$pageview` so PostHog web analytics works. */
+  trackScreen(screen: string) {
+    if (!this.analyticsActive() || !/^[a-z_]{2,32}$/.test(screen)) return;
+    if (telemetryDevice().platform === "web") {
+      this.enqueueTelemetry("$pageview", { $screen_name: screen, $pathname: `/${screen}` });
+    } else {
+      this.enqueueTelemetry("$screen", { $screen_name: screen });
+    }
+  }
+
+  captureException(error: unknown) {
+    if (!this.analyticsActive()) return;
+    const exception = safeExceptionMessage(error);
+    this.enqueueTelemetry("$exception", {
+      $exception_list: [{ ...exception, mechanism: { handled: false, type: "generic" } }],
+    });
+    void this.flushTelemetry();
+  }
+
+  private enqueueTelemetry(event: string, properties: Record<string, unknown>) {
+    const now = Date.now();
     if (this.telemetryQueue.length >= 100) this.telemetryQueue.shift();
     this.telemetryQueue.push({
       event,
-      properties: { ...properties, platform: inferDeviceProfile(), app_version: this.appVersion },
-      queuedAt: Date.now(),
+      properties: {
+        ...properties,
+        ...telemetryDevice(),
+        app_version: this.appVersion,
+        $app_version: this.appVersion,
+        $lib: "reclinarr-client",
+        environment: telemetryEnvironment(),
+        $session_id: this.telemetrySessionId(now),
+      },
+      queuedAt: now,
     });
     if (this.telemetryQueue.length >= 10) void this.flushTelemetry();
     else if (!this.telemetryFlushTimer) {
@@ -291,32 +440,49 @@ export class ReclinarrClient {
     }
   }
 
-  captureException(error: unknown) {
-    if (!this.analyticsActive()) return;
-    const exception = safeExceptionMessage(error);
-    const event = "$exception";
-    if (this.telemetryQueue.length >= 100) this.telemetryQueue.shift();
-    this.telemetryQueue.push({
-      event,
-      properties: { $exception_list: [{ ...exception, mechanism: { handled: false, type: "generic" } }], platform: inferDeviceProfile(), app_version: this.appVersion },
-      queuedAt: Date.now(),
+  private telemetrySessionId(now: number): string {
+    const current = this.telemetrySession;
+    if (
+      !current ||
+      now - current.lastActivityAt > TELEMETRY_SESSION_IDLE_MS ||
+      now - current.startedAt > TELEMETRY_SESSION_MAX_MS
+    ) {
+      this.telemetrySession = { id: uuidv7(now), startedAt: now, lastActivityAt: now };
+      this.saveTelemetrySession();
+      return this.telemetrySession.id;
+    }
+    current.lastActivityAt = now;
+    // Activity only needs minute precision against a 30 minute idle window.
+    if (now - this.telemetrySessionSavedAt >= 60_000) this.saveTelemetrySession();
+    return current.id;
+  }
+
+  private saveTelemetrySession() {
+    const key = this.telemetrySessionKey;
+    const session = this.telemetrySession;
+    const storage = this.storage;
+    if (!key || !session || !storage) return;
+    this.telemetrySessionSavedAt = session.lastActivityAt;
+    const value = JSON.stringify(session);
+    void Promise.resolve().then(() => storage.setItem(key, value)).catch(() => {
+      // Best effort: the in-memory session keeps working; a reload just starts a new one.
     });
-    void this.flushTelemetry();
   }
 
   private async flushTelemetry() {
     if (this.telemetryFlushing) return;
     if (this.telemetryFlushTimer) clearTimeout(this.telemetryFlushTimer);
     this.telemetryFlushTimer = null;
-    if (!this.analyticsActive() || !this.telemetryQueue.length || !this.telemetryProjectKey) return;
+    if (!this.analyticsActive() || !this.telemetryQueue.length) return;
     this.telemetryFlushing = true;
     const flushGeneration = this.telemetryGeneration;
     const flushDistinctId = this.telemetryDistinctId;
     const pending = this.telemetryQueue.splice(0, 50);
     const batch = pending
       .filter((event) => Date.now() - event.queuedAt <= 5 * 60_000)
-      .map(({ event, properties }) => ({
+      .map(({ event, properties, queuedAt }) => ({
         event,
+        timestamp: new Date(queuedAt).toISOString(),
         properties: {
           ...properties,
           distinct_id: flushDistinctId,
@@ -334,7 +500,7 @@ export class ReclinarrClient {
       const response = await this.fetchImpl(POSTHOG_BATCH_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: this.telemetryProjectKey, batch }),
+        body: JSON.stringify({ token: POSTHOG_PROJECT_KEY, batch }),
       });
       succeeded = response.ok;
     } catch {
@@ -365,7 +531,9 @@ export class ReclinarrClient {
       ...(telemetryEnabledAtStart && telemetryDistinctIdAtStart
         ? {
             "x-reclinarr-telemetry-id": telemetryDistinctIdAtStart,
-            "x-reclinarr-client-platform": inferDeviceProfile(),
+            "x-reclinarr-telemetry-session": this.telemetrySessionId(Date.now()),
+            "x-reclinarr-client-platform": telemetryDevice().platform,
+            "x-reclinarr-client-device": telemetryDevice().$device_type,
             "x-reclinarr-client-version": this.appVersion,
           }
         : {}),
@@ -430,6 +598,7 @@ export class ReclinarrClient {
     await this.setSessionId(sid);
     // Prove this same client instance is accepted before callers navigate away.
     await this.me();
+    void this.syncPreferences().catch((err) => console.error("[preferences] sync failed", err));
     return data;
   }
 
@@ -471,12 +640,17 @@ export class ReclinarrClient {
     this.telemetryDistinctId = null;
     this.telemetryGeneration += 1;
     this.telemetryQueue = [];
+    this.telemetrySession = null;
+    this.telemetrySessionKey = null;
+    this.telemetrySessionSavedAt = 0;
     if (this.telemetryFlushTimer) clearTimeout(this.telemetryFlushTimer);
     this.telemetryFlushTimer = null;
   }
 
   me() {
-    return this.request<{ user: { id: string; username: string }; mocks: boolean }>("/api/auth/me");
+    return this.request<{ user: { id: string; username: string; demo?: boolean }; mocks: boolean }>(
+      "/api/auth/me",
+    );
   }
 
   health() {
@@ -539,11 +713,61 @@ export class ReclinarrClient {
     );
   }
 
-  toggleMyList(type: "movie" | "tv", tmdbId: number) {
-    return this.request<{ items: string[]; onList: boolean }>("/api/mylist/toggle", {
+  async toggleMyList(type: "movie" | "tv", tmdbId: number) {
+    const result = await this.request<{ items: string[]; onList: boolean }>("/api/mylist/toggle", {
       method: "POST",
       body: JSON.stringify({ type, tmdbId }),
     });
+    this.trackFeature(result.onList ? "my_list_add" : "my_list_remove");
+    return result;
+  }
+
+  adminServices() {
+    return this.request<AdminServicesResponse>("/api/admin/services");
+  }
+
+  testAdminService(service: ServiceId, edit: ServiceEdit) {
+    return this.request<ServiceTestResult>(`/api/admin/services/${service}/test`, {
+      method: "POST",
+      body: JSON.stringify(edit),
+    });
+  }
+
+  /** The API reloads itself after saving, so requests fail for a few seconds afterwards. */
+  saveAdminService(service: ServiceId, edit: ServiceEdit) {
+    return this.request<{ saved: boolean }>(`/api/admin/services/${service}`, {
+      method: "PUT",
+      body: JSON.stringify(edit),
+    });
+  }
+
+  getPreferences() {
+    return this.request<PreferencesResponse>("/api/preferences");
+  }
+
+  /** Saves to the server first, then mirrors into device storage for the player. */
+  async updatePreferences(patch: Partial<UserPreferences>): Promise<UserPreferences> {
+    const { preferences } = await this.request<PreferencesResponse>("/api/preferences", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+    await saveLocalPreferences(preferences, this.storage);
+    return preferences;
+  }
+
+  /**
+   * Pulls the user's server-side preferences into device storage. If the server has none yet,
+   * the device's existing choices are uploaded instead so they aren't lost.
+   */
+  async syncPreferences(): Promise<UserPreferences> {
+    const remote = await this.getPreferences();
+    if (remote.saved) {
+      await saveLocalPreferences(remote.preferences, this.storage);
+      return remote.preferences;
+    }
+    const local = await loadLocalPreferences(this.storage);
+    if (isDefaultPreferences(local)) return remote.preferences;
+    return this.updatePreferences(local);
   }
 
   discoverTrending(page = 1, mediaType?: "movie" | "tv") {
@@ -579,11 +803,11 @@ export class ReclinarrClient {
     );
   }
 
-  requestMedia(
+  async requestMedia(
     identity: MediaIdentity,
     opts?: { seasons?: number[] | "all"; is4k?: boolean },
   ) {
-    return this.request<{ ok: true; media: Media | null }>("/api/request", {
+    const result = await this.request<{ ok: true; media: Media | null }>("/api/request", {
       method: "POST",
       body: JSON.stringify({
         identity,
@@ -591,9 +815,11 @@ export class ReclinarrClient {
         is4k: opts?.is4k,
       }),
     });
+    this.trackFeature("request");
+    return result;
   }
 
-  startAcquisition(input: {
+  async startAcquisition(input: {
     identity: MediaIdentity;
     mode?: "cache" | "library";
     source: {
@@ -605,10 +831,12 @@ export class ReclinarrClient {
       m3uAccountId?: number;
     };
   }) {
-    return this.request<{ item: Acquisition }>("/api/acquisitions", {
+    const result = await this.request<{ item: Acquisition }>("/api/acquisitions", {
       method: "POST",
       body: JSON.stringify(input),
     });
+    this.trackFeature("download");
+    return result;
   }
 
   getAcquisition(id: string) {
@@ -786,8 +1014,8 @@ export class ReclinarrClient {
       if (item.state === "failed" || item.state === "cancelled") {
         throw new Error(
           item.state === "cancelled"
-            ? "Download was cancelled"
-            : "Download failed — IPTV may be busy (stop Live TV and retry)",
+            ? "Caching was cancelled"
+            : "Caching failed — IPTV may be busy (stop Live TV and retry)",
         );
       }
       opts?.onBuffering?.({
@@ -804,7 +1032,7 @@ export class ReclinarrClient {
       await new Promise((r) => setTimeout(r, PLAY_BUFFER_POLL_MS));
     }
 
-    throw new Error("Timed out waiting for download to become playable");
+    throw new Error("Timed out waiting for the cache to become playable");
   }
 
   listPlaybackSubtitles(
@@ -900,11 +1128,13 @@ export class ReclinarrClient {
     );
   }
 
-  toggleLiveFavourite(uuid: string) {
-    return this.request<{ favourites: string[]; favourite: boolean }>(
+  async toggleLiveFavourite(uuid: string) {
+    const result = await this.request<{ favourites: string[]; favourite: boolean }>(
       `/api/live/favourites/${encodeURIComponent(uuid)}/toggle`,
       { method: "POST" },
     );
+    this.trackFeature("live_favourite");
+    return result;
   }
 
   playLiveChannel(uuid: string, opts?: { hls?: boolean }) {
@@ -966,6 +1196,10 @@ export function trackTelemetry(event: string, properties: Record<string, unknown
   }
 }
 
+export function trackFeature(feature: TelemetryFeature): void {
+  trackTelemetry("client.feature_used", { feature });
+}
+
 export function login(input: {
   username: string;
   password: string;
@@ -1025,6 +1259,22 @@ export function myListHas(type: "movie" | "tv", tmdbId: number) {
 
 export function toggleMyList(type: "movie" | "tv", tmdbId: number) {
   return getClient().toggleMyList(type, tmdbId);
+}
+
+export function adminServices() {
+  return getClient().adminServices();
+}
+
+export function testAdminService(service: ServiceId, edit: ServiceEdit) {
+  return getClient().testAdminService(service, edit);
+}
+
+export function saveAdminService(service: ServiceId, edit: ServiceEdit) {
+  return getClient().saveAdminService(service, edit);
+}
+
+export function syncPreferences() {
+  return getClient().syncPreferences();
 }
 
 export function discoverTrending(page = 1, mediaType?: "movie" | "tv") {

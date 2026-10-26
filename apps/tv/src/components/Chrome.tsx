@@ -9,12 +9,14 @@ import {
 } from "@react-navigation/native";
 import { logout } from "@reclinarr/client";
 import {
+  AccentFill,
   BrandLogo,
   Shade,
   TvFocusLockProvider,
   TvInitialFocusSuppressProvider,
   colors,
   isTvFocused,
+  useIsDemoUser,
   webBg,
 } from "@reclinarr/native-ui";
 import type { Nav, RootStackParamList } from "../nav";
@@ -96,6 +98,7 @@ export function Chrome({
   const [menuOpen, setMenuOpen] = useState(false);
   const solid = !overlay || scrolled || menuOpen;
   const initial = ((username ?? "U").trim()[0] || "U").toUpperCase();
+  const demo = useIsDemoUser();
 
   async function signOut() {
     try {
@@ -222,6 +225,7 @@ export function Chrome({
               focusable={canFocus}
               style={(s) => [styles.avatar, isTvFocused(s) && styles.avatarFocused]}
             >
+              <AccentFill style={styles.avatarFill} />
               <Text style={styles.avatarText}>{initial}</Text>
             </Pressable>
             {menuOpen ? (
@@ -239,7 +243,7 @@ export function Chrome({
                     <Text
                       style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
                     >
-                      Downloads
+                      Cache
                     </Text>
                   )}
                 </Pressable>
@@ -259,22 +263,24 @@ export function Chrome({
                     </Text>
                   )}
                 </Pressable>
-                <Pressable
-                  style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
-                  focusable={canFocus}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    navigation.navigate("Requests");
-                  }}
-                >
-                  {(state) => (
-                    <Text
-                      style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
-                    >
-                      Requests
-                    </Text>
-                  )}
-                </Pressable>
+                {demo ? null : (
+                  <Pressable
+                    style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                    focusable={canFocus}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      navigation.navigate("Requests");
+                    }}
+                  >
+                    {(state) => (
+                      <Text
+                        style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
+                      >
+                        Requests
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
                   focusable={canFocus}
@@ -391,6 +397,7 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 4,
     backgroundColor: colors.accent,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
@@ -400,7 +407,8 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
     transform: [{ scale: 1.12 }],
   },
-  avatarText: { color: colors.bg, fontWeight: "700", fontSize: 15 },
+  avatarFill: { top: -3, left: -3, right: -3, bottom: -3 },
+  avatarText: { color: colors.text, fontWeight: "700", fontSize: 15 },
   menu: {
     position: "absolute",
     top: 44,

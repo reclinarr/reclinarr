@@ -1,10 +1,16 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { resolvePreferredAction, type Media } from "@reclinarr/shared";
-import { mediaByTmdb, primaryAction, requestMedia } from "@reclinarr/client";
+import { me, mediaByTmdb, primaryAction, requestMedia } from "@reclinarr/client";
 
 const DOWNLOAD_POLL_MS = 4_000;
-const APPROVAL_POLL_MS = 20_000;
+const APPROVAL_POLL_MS = 5_000;
+
+/** Demo accounts (store review) can't request titles or start IPTV downloads; the API refuses both. */
+export function useIsDemoUser(): boolean {
+  const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  return session.data?.user.demo === true;
+}
 
 /** Overlay fresh Seerr/Jellyfin state onto `base` without dropping its IPTV/cache entries. */
 function withLiveRequestState(base: Media, live: Media | undefined): Media {
@@ -27,6 +33,7 @@ function withLiveRequestState(base: Media, live: Media | undefined): Media {
  */
 export function useMediaRequest(media: Media | null | undefined) {
   const qc = useQueryClient();
+  const demo = useIsDemoUser();
   const type = media?.identity.mediaType;
   const tmdbId = media?.identity.tmdbId;
   const target =
@@ -61,18 +68,23 @@ export function useMediaRequest(media: Media | null | undefined) {
     () => (media ? withLiveRequestState(media, live.data?.media) : media),
     [media, live.data?.media],
   );
-  const action = effective
+  const baseAction = effective
     ? submit.isPending
       ? { ...primaryAction(effective), kind: "requested" as const, label: "Requesting…" }
       : primaryAction(effective)
     : null;
+  const action =
+    demo && effective && baseAction?.kind !== "play"
+      ? { kind: "none" as const, label: "Not available", progress: null, hint: "" }
+      : baseAction;
 
   return {
     media: effective,
     action,
     request: () => {
-      if (target && !submit.isPending) submit.mutate();
+      if (target && !demo && !submit.isPending) submit.mutate();
     },
+    pending: submit.isPending,
     error: submit.error,
   };
 }

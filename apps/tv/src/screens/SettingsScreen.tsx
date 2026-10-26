@@ -1,5 +1,4 @@
 import { ScrollView, StyleSheet, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 import { me } from "@reclinarr/client";
 import { AnalyticsConsentSettings, PlaybackLanguageSettings, colors } from "@reclinarr/native-ui";
@@ -19,7 +18,7 @@ export function SettingsScreen({ username }: { username: string }) {
         contentContainerStyle={[styles.content, { paddingHorizontal: layout.pageX }]}
       >
         <View style={styles.card}>
-          <PlaybackLanguageSettings storage={AsyncStorage} />
+          <PlaybackLanguageSettings />
           {session.data?.user.id ? (
             <AnalyticsConsentSettings userId={session.data.user.id} />
           ) : null}

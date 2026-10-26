@@ -24,12 +24,7 @@ export async function clearSession(): Promise<void> {
 }
 
 export function attachClient(baseUrl: string): ReclinarrClient {
-  return attach(
-    AsyncStorage,
-    baseUrl,
-    appConfig.expo.version,
-    process.env.EXPO_PUBLIC_POSTHOG_PROJECT_KEY,
-  );
+  return attach(AsyncStorage, baseUrl, appConfig.expo.version);
 }
 
 /** Re-attach after Metro reload / cold start so login sessions are stored. */

@@ -55,6 +55,7 @@ export function mapJellyfinItemToMedia(
       positionSeconds,
       durationSeconds,
       ...(lastPlayedAt ? { lastPlayedAt } : {}),
+      ...(item.UserData?.Played !== undefined ? { played: item.UserData.Played } : {}),
     },
   ];
 

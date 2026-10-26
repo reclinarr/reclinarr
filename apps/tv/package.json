@@ -4,8 +4,8 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "EXPO_TV=1 node ../../scripts/with-expo-env.mjs expo start",
-    "android": "EXPO_TV=1 node ../../scripts/with-expo-env.mjs expo run:android",
+    "start": "EXPO_TV=1 expo start",
+    "android": "EXPO_TV=1 expo run:android",
     "prebuild": "EXPO_TV=1 expo prebuild --clean",
     "prebuild:tv": "EXPO_TV=1 expo prebuild --clean",
     "typecheck": "tsc -p tsconfig.json --noEmit",

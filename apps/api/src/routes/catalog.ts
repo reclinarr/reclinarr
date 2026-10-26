@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Media } from "@reclinarr/shared";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { isDemoSession, requireAuth } from "../plugins/auth.js";
 import {
   buildCatalogDiscoveryRails,
   libraryKeysFromItems,
@@ -15,7 +15,7 @@ export async function registerCatalogRoutes(
   ctx: AppContext,
 ): Promise<void> {
   app.get("/api/catalog/:mediaType", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext, session } = await requireAuth(req);
     const params = z.object({ mediaType: z.enum(["movie", "tv"]) }).parse(req.params);
     const query = z
       .object({
@@ -36,7 +36,9 @@ export async function registerCatalogRoutes(
     }
 
     const libraryKeys = libraryKeysFromItems(library);
-    const discovery = await buildCatalogDiscoveryRails(ctx, params.mediaType, libraryKeys);
+    const discovery = isDemoSession(ctx, session)
+      ? []
+      : await buildCatalogDiscoveryRails(ctx, params.mediaType, libraryKeys);
 
     const rows: CatalogRail[] = [
       ...(library.length

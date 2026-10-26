@@ -74,3 +74,22 @@ export function DownloadIcon({ color, size = 14 }: { color: string; size?: numbe
     </View>
   );
 }
+
+/** Checkmark — watched marker. */
+export function CheckIcon({ color, size = 14 }: { color: string; size?: number }) {
+  const stroke = Math.max(2, Math.round(size * 0.14));
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <View
+        style={{
+          width: size * 0.34,
+          height: size * 0.62,
+          borderRightWidth: stroke,
+          borderBottomWidth: stroke,
+          borderColor: color,
+          transform: [{ rotate: "45deg" }, { translateY: -size * 0.06 }],
+        }}
+      />
+    </View>
+  );
+}

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Acquisition, Media, MediaIdentity } from "@reclinarr/shared";
 import { listAcquisitions, startAcquisition } from "@reclinarr/client";
+import { useIsDemoUser } from "./useMediaRequest.js";
 
 const ACTIVE_STATES = ["queued", "downloading", "playable"] as const;
 
@@ -39,17 +40,19 @@ export type TitleDownloadState =
   | { kind: "downloaded"; label: string };
 
 /**
- * Secondary "Download" pill for titles that already stream on demand: saves the IPTV
+ * Secondary "Cache" pill for titles that already stream on demand: saves the IPTV
  * source to the local cache and reports the job's progress. Series pages download per episode.
  */
 export function useTitleDownload(media: Media | null | undefined) {
   const qc = useQueryClient();
+  const demo = useIsDemoUser();
   const iptv = media?.availability.find((a) => a.provider === "dispatcharr");
   const cache = media?.availability.find((a) => a.provider === "cache");
   const jellyfin = media?.availability.find((a) => a.provider === "jellyfin");
   const kind = media?.identity.mediaType;
   const eligible = Boolean(
     media &&
+      !demo &&
       (kind === "movie" || kind === "episode") &&
       iptv?.provider === "dispatcharr" &&
       iptv.uuid &&
@@ -71,7 +74,7 @@ export function useTitleDownload(media: Media | null | undefined) {
   const start = useMutation({
     mutationFn: async () => {
       if (!media || iptv?.provider !== "dispatcharr" || !iptv.uuid) {
-        throw new Error("No on-demand source to download");
+        throw new Error("No on-demand source to cache");
       }
       await startAcquisition({
         identity: media.identity,
@@ -94,21 +97,24 @@ export function useTitleDownload(media: Media | null | undefined) {
     const job = matchAcquisition(acquisitions.data?.items, media.identity);
     const cacheComplete = cache?.provider === "cache" && cache.complete;
     if (job?.state === "completed" || (!job && cacheComplete)) {
-      state = { kind: "downloaded", label: "Downloaded" };
+      state = { kind: "downloaded", label: "Cached" };
     } else if (start.isPending || (job && (ACTIVE_STATES as readonly string[]).includes(job.state))) {
       const progress = job ? acquisitionProgressPercent(job) : null;
       state = {
         kind: "downloading",
-        label: progress != null ? `Downloading ${progress}%` : "Downloading…",
+        label: progress != null ? `Caching ${progress}%` : "Caching…",
         progress,
       };
     } else {
-      state = { kind: "download", label: "Download" };
+      state = { kind: "download", label: "Cache" };
     }
   }
 
   return {
     state,
+    /** Eligible, but existing download jobs haven't loaded, so `state` may still change. */
+    loading: eligible && acquisitions.isPending,
+    pending: start.isPending,
     start: () => {
       if (state?.kind === "download" && !start.isPending) start.mutate();
     },

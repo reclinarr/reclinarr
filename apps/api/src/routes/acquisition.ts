@@ -6,7 +6,7 @@ import {
   tmdbLanguageReference,
 } from "@reclinarr/shared";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { requireAuth, requireFullAccess } from "../plugins/auth.js";
 
 function publicAcquisition<T extends { localPath?: string }>(item: T): Omit<T, "localPath"> {
   const { localPath: _localPath, ...rest } = item;
@@ -35,7 +35,7 @@ export async function registerAcquisitionRoutes(
   });
 
   app.post("/api/acquisitions", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext } = await requireFullAccess(ctx, req);
     ctx.lastLibraryUserContext = userContext;
     const body = z
       .object({
@@ -99,7 +99,7 @@ export async function registerAcquisitionRoutes(
   });
 
   app.post("/api/acquisitions/:id/cancel", async (req) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const item = await ctx.acquisitions.cancel(id);
     if (!item) {
@@ -111,7 +111,7 @@ export async function registerAcquisitionRoutes(
   });
 
   app.post("/api/acquisitions/:id/promote", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext } = await requireFullAccess(ctx, req);
     ctx.lastLibraryUserContext = userContext;
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const item = await ctx.acquisitions.promoteToLibrary(id);

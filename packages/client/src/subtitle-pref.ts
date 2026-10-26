@@ -49,16 +49,13 @@ export async function saveSubtitleOff(storage?: KeyValueStorage): Promise<void> 
   await saveSubtitlePref({ mode: "off" }, storage);
 }
 
-export async function saveSubtitleTrack(track: SubtitleTrack, storage?: KeyValueStorage): Promise<void> {
-  await saveSubtitlePref(
-    {
-      mode: "on",
-      language: normalizeSubtitleLanguage(track.language) || "",
-      forced: Boolean(track.forced),
-      hearingImpaired: Boolean(track.hearingImpaired),
-    },
-    storage,
-  );
+export function subtitlePrefForTrack(track: SubtitleTrack): SubtitlePref {
+  return {
+    mode: "on",
+    language: normalizeSubtitleLanguage(track.language) || "",
+    forced: Boolean(track.forced),
+    hearingImpaired: Boolean(track.hearingImpaired),
+  };
 }
 
 /**

@@ -16,10 +16,11 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { logout, me, playLiveChannel } from "@reclinarr/client";
 import { colors } from "@reclinarr/native-ui";
 import { WebChrome } from "./components/WebChrome";
+import { ServicesSettings } from "./ServicesSettings";
 import { useWebLayout } from "./layout";
 import type { PlayParams, RootStackParamList } from "./nav";
 import {
@@ -108,7 +109,7 @@ export function DownloadsScreen({ username }: { username: string }) {
   const nav = useScreenNav();
   return (
     <WebChrome username={username}>
-      <SharedDownloads nav={nav} header={<PageHeading title="Downloads" />} />
+      <SharedDownloads nav={nav} header={<PageHeading title="Cache" />} />
     </WebChrome>
   );
 }
@@ -365,28 +366,34 @@ function formatResumeClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function ProfileScreen({ username }: { username: string }) {
+export function SettingsScreen({ username }: { username: string }) {
   const navigation = useNavigation<Nav>();
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const { width } = useWindowDimensions();
   return (
     <WebChrome username={username}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.profile, { paddingTop: 68 + 36 }]}>
-        <Text style={styles.h1}>Profile</Text>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.profile,
+          { paddingTop: 68 + 36, paddingHorizontal: width < 600 ? 16 : 32 },
+        ]}
+      >
+        <Text style={styles.h1}>Settings</Text>
+        <Text style={styles.sectionTitle}>Account</Text>
         <Text style={styles.copy}>Signed in as {username}</Text>
-        <PlaybackLanguageSettings storage={storage} />
-        {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
+        <Text style={styles.sectionTitle}>Playback</Text>
+        <PlaybackLanguageSettings />
+        <ServicesSettings />
+        {session.data?.user.id ? (
+          <>
+            <Text style={styles.sectionTitle}>Privacy</Text>
+            <AnalyticsConsentSettings userId={session.data.user.id} />
+          </>
+        ) : null}
         <Pressable
-          style={styles.btn}
-          onPress={() => navigation.navigate("Downloads")}
-        >
-          <Text style={styles.btnText}>Downloads</Text>
-        </Pressable>
-        <Pressable style={styles.btn} onPress={() => navigation.navigate("Requests")}>
-          <Text style={styles.btnText}>Requests</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.danger]}
+          style={[styles.btn, styles.danger, styles.signOut]}
           onPress={async () => {
             try {
               await logout();
@@ -408,9 +415,18 @@ export function ProfileScreen({ username }: { username: string }) {
 
 const styles = StyleSheet.create({
   pageTitle: { color: "#fff", fontSize: 32, fontWeight: "700", letterSpacing: -0.4 },
-  profile: { padding: 32, gap: 12, maxWidth: 760 },
+  profile: { paddingVertical: 32, gap: 12, maxWidth: 1120, width: "100%" },
+  signOut: { alignSelf: "flex-start", paddingHorizontal: 28 },
   h1: { color: colors.text, fontSize: 28, fontWeight: "800", marginBottom: 8 },
   copy: { color: colors.muted, marginBottom: 16 },
+  sectionTitle: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginTop: 12,
+  },
   playerFallback: {
     flex: 1,
     backgroundColor: "#000",

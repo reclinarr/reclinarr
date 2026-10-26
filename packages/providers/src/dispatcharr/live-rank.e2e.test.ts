@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { DispatcharrProvider } from "./provider.js";
 
 /** Load repo-root .env without printing secrets. */
@@ -35,11 +35,15 @@ const apiKey = process.env.DISPATCHARR_API_KEY?.trim();
 const live = process.env.RECLINARR_LIVE_TESTS === "true" && Boolean(baseUrl && apiKey);
 
 describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
-  const provider = new DispatcharrProvider({
-    baseUrl: baseUrl!,
-    auth: { type: "apiKey", apiKey: apiKey! },
-    preferredLanguages: ["en"],
-    timeoutMs: 45_000,
+  // Vitest runs a skipped describe body to collect tests, so construct only once they run.
+  let provider: DispatcharrProvider;
+  beforeAll(() => {
+    provider = new DispatcharrProvider({
+      baseUrl: baseUrl!,
+      auth: { type: "apiKey", apiKey: apiKey! },
+      preferredLanguages: ["en"],
+      timeoutMs: 45_000,
+    });
   });
 
   it("Fight Club (tmdb 550): picks an EN category stream over DE/IR/service buckets", async () => {

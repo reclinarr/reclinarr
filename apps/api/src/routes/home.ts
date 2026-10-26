@@ -3,7 +3,7 @@ import type { Media, TmdbLanguageReference } from "@reclinarr/shared";
 import { resolvePreferredAction, tmdbLanguageReference } from "@reclinarr/shared";
 import type { DiscoveryProvider, UserContext } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { isDemoSession, requireAuth } from "../plugins/auth.js";
 import { jellyfinTmdbIndex } from "../db/schema.js";
 import { IptvProgressStore } from "../services/iptv-progress.js";
 import { buildHomeDiscoveryRails } from "../services/catalog-rails.js";
@@ -101,12 +101,13 @@ export async function registerHomeRoutes(app: FastifyInstance, ctx: AppContext):
 
   app.get("/api/home", async (req) => {
     const { userContext, session } = await requireAuth(req);
+    const demo = isDemoSession(ctx, session);
 
     const [continueWatching, nextUp, recentlyAdded, discoveryRails] = await Promise.all([
       ctx.jellyfin.getContinueWatching(userContext).catch(() => []),
       ctx.jellyfin.getNextUp(userContext).catch(() => []),
       ctx.jellyfin.getRecentlyAdded(userContext).catch(() => []),
-      buildHomeDiscoveryRails(ctx),
+      demo ? [] : buildHomeDiscoveryRails(ctx),
     ]);
     const [libraryContinue, iptvContinue] = await Promise.all([
       hydrateContinueWatching(ctx, userContext, continueWatching),
@@ -243,7 +244,7 @@ export async function registerHomeRoutes(app: FastifyInstance, ctx: AppContext):
           : null;
     const seedTmdb = seed?.identity.tmdbId;
     const discovery = ctx.seerr as DiscoveryProvider;
-    if (seedType && seedTmdb && discovery.getSimilar) {
+    if (!demo && seedType && seedTmdb && discovery.getSimilar) {
       const similar = await discovery.getSimilar(seedType, seedTmdb).catch(() => [] as Media[]);
       const { enrichDiscoveryRow } = await import("../services/media-enrichment.js");
       const enriched = enrichDiscoveryRow(ctx, similar).slice(0, 18);

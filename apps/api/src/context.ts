@@ -9,13 +9,14 @@ import {
   type MediaProvider,
 } from "@reclinarr/providers";
 import type { AppConfig } from "./config.js";
-import { MemoryCache } from "./cache.js";
+import { MemoryCache, withSeerrCache } from "./cache.js";
 import { createDb, type AppDb } from "./db/client.js";
 import { SessionService } from "./services/session.js";
 import { PlaybackResolver } from "./services/playback-resolver.js";
 import { AcquisitionManager } from "./services/acquisition-manager.js";
 import { LiveFavouritesStore } from "./services/live-favourites.js";
 import { MyListStore } from "./services/my-list.js";
+import { PreferencesStore } from "./services/preferences.js";
 import { CacheManager } from "./services/cache-manager.js";
 import { IptvConnectionManager } from "./services/iptv-connection-manager.js";
 import { IptvProgressStore } from "./services/iptv-progress.js";
@@ -23,6 +24,7 @@ import { LiveHlsManager } from "./services/live-hls.js";
 import { startVodCatalogSync } from "./services/vod-catalog-sync.js";
 import { TelemetryService } from "./services/telemetry.js";
 import { setProviderMetricsObserver } from "@reclinarr/providers";
+import { POSTHOG_PROJECT_KEY } from "@reclinarr/shared";
 
 export interface AppContext {
   config: AppConfig;
@@ -38,6 +40,7 @@ export interface AppContext {
   acquisitions: AcquisitionManager;
   liveFavourites: LiveFavouritesStore;
   myList: MyListStore;
+  preferences: PreferencesStore;
   cacheManager: CacheManager;
   iptvConnections: IptvConnectionManager;
   iptvProgress: IptvProgressStore;
@@ -46,6 +49,8 @@ export interface AppContext {
   /** Last authenticated Jellyfin user context used for background library scans. */
   lastLibraryUserContext?: import("@reclinarr/providers").UserContext;
   useMocks: boolean;
+  /** Stops background timers and live sessions and closes the database. */
+  close: () => void;
 }
 
 export function createAppContext(config: AppConfig): AppContext {
@@ -70,8 +75,9 @@ export function createAppContext(config: AppConfig): AppContext {
   const useMocks = explicitMocks || missingJellyfin;
   const db = createDb(config.RECLINARR_DATA_DIR);
   const telemetry = new TelemetryService(
-    config.RECLINARR_POSTHOG_PROJECT_KEY,
+    POSTHOG_PROJECT_KEY,
     config.RECLINARR_TELEMETRY_DISABLED,
+    config.NODE_ENV === "development" || explicitMocks ? "development" : "production",
   );
   setProviderMetricsObserver((metric) => {
     telemetry.captureCurrent("server.provider_operation", {
@@ -90,6 +96,8 @@ export function createAppContext(config: AppConfig): AppContext {
     });
   }, 60 * 60_000);
   purgeTimer.unref?.();
+  const cachePurgeTimer = setInterval(() => cache.purgeExpired(), 10 * 60_000);
+  cachePurgeTimer.unref?.();
 
   const jellyfin = useMocks
     ? new MockJellyfinProvider()
@@ -99,13 +107,16 @@ export function createAppContext(config: AppConfig): AppContext {
         reclinarrPublicUrl: config.RECLINARR_PUBLIC_URL,
       });
 
-  const seerr = useMocks
-    ? new MockSeerrProvider()
-    : new SeerrProvider({
-        baseUrl: config.SEERR_URL,
-        apiKey: config.SEERR_API_KEY,
-        timeoutMs: config.HTTP_TIMEOUT_MS,
-      });
+  const seerr = withSeerrCache(
+    useMocks
+      ? new MockSeerrProvider()
+      : new SeerrProvider({
+          baseUrl: config.SEERR_URL,
+          apiKey: config.SEERR_API_KEY,
+          timeoutMs: config.HTTP_TIMEOUT_MS,
+        }),
+    cache,
+  );
 
   const dispatcharr = useMocks
     ? new MockDispatcharrProvider()
@@ -127,6 +138,7 @@ export function createAppContext(config: AppConfig): AppContext {
   const providers: MediaProvider[] = [jellyfin, seerr, dispatcharr, bazarr];
   const liveFavourites = new LiveFavouritesStore(db);
   const myList = new MyListStore(db);
+  const preferences = new PreferencesStore(db);
   const cacheManager = new CacheManager(db, {
     maxBytes: config.RECLINARR_CACHE_MAX_BYTES,
     ttlMs: config.RECLINARR_CACHE_TTL_MS,
@@ -164,6 +176,32 @@ export function createAppContext(config: AppConfig): AppContext {
     iptvProgress,
   );
 
+  // Periodic cache eviction
+  const evictTimer = setInterval(() => {
+    try {
+      const n = cacheManager.evict();
+      if (n > 0) console.info(`[cache] evicted ${n} acquisition(s)`);
+    } catch (err) {
+      console.error("[cache] eviction failed", err);
+    }
+  }, 15 * 60_000);
+  evictTimer.unref?.();
+  cacheManager.evict();
+
+  // Background warm of hot Seerr titles into the Dispatcharr TMDb index (no full catalogue scan).
+  const vodSync = startVodCatalogSync({
+    db,
+    dispatcharr: dispatcharr as DispatcharrProvider,
+    seerr,
+    preferredLanguages: config.RECLINARR_PREFERRED_LANGUAGES,
+    intervalMs: config.RECLINARR_VOD_SYNC_INTERVAL_MS,
+    enabled:
+      !useMocks &&
+      Boolean(config.DISPATCHARR_URL?.trim()) &&
+      Boolean(config.SEERR_URL?.trim()) &&
+      dispatcharr instanceof DispatcharrProvider,
+  });
+
   const ctx: AppContext = {
     config,
     db,
@@ -178,25 +216,22 @@ export function createAppContext(config: AppConfig): AppContext {
     acquisitions,
     liveFavourites,
     myList,
+    preferences,
     cacheManager,
     iptvConnections,
     iptvProgress,
     liveHls,
     telemetry,
     useMocks,
+    close: () => {
+      clearInterval(purgeTimer);
+      clearInterval(cachePurgeTimer);
+      clearInterval(evictTimer);
+      vodSync.stop();
+      liveHls.stop();
+      db.$client.close();
+    },
   };
-
-  // Periodic cache eviction
-  const evictTimer = setInterval(() => {
-    try {
-      const n = cacheManager.evict();
-      if (n > 0) console.info(`[cache] evicted ${n} acquisition(s)`);
-    } catch (err) {
-      console.error("[cache] eviction failed", err);
-    }
-  }, 15 * 60_000);
-  evictTimer.unref?.();
-  cacheManager.evict();
 
   acquisitions.setLibraryPromotedHandler(async (localPath) => {
     const userContext = ctx.lastLibraryUserContext;
@@ -227,20 +262,6 @@ export function createAppContext(config: AppConfig): AppContext {
       seasonNumber: identity.seasonNumber,
       episodeNumber: identity.episodeNumber,
     };
-  });
-
-  // Background warm of hot Seerr titles into the Dispatcharr TMDb index (no full catalogue scan).
-  startVodCatalogSync({
-    db,
-    dispatcharr: dispatcharr as DispatcharrProvider,
-    seerr,
-    preferredLanguages: config.RECLINARR_PREFERRED_LANGUAGES,
-    intervalMs: config.RECLINARR_VOD_SYNC_INTERVAL_MS,
-    enabled:
-      !useMocks &&
-      Boolean(config.DISPATCHARR_URL?.trim()) &&
-      Boolean(config.SEERR_URL?.trim()) &&
-      dispatcharr instanceof DispatcharrProvider,
   });
 
   return ctx;

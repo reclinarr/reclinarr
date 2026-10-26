@@ -18,6 +18,7 @@ import {
   JellyfinItemsResponseSchema,
   JellyfinPlaybackInfoSchema,
   JellyfinSystemInfoSchema,
+  JellyfinUserPolicySchema,
   type JellyfinItem,
 } from "./schemas.js";
 
@@ -106,6 +107,15 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
       accessToken: data.AccessToken,
       serverId: data.ServerId,
     };
+  }
+
+  async isAdministrator(ctx: UserContext): Promise<boolean> {
+    const { data } = await this.httpFor(ctx).request(
+      "GET",
+      `/Users/${encodeURIComponent(ctx.jellyfinUserId)}`,
+      { schema: JellyfinUserPolicySchema },
+    );
+    return data.Policy?.IsAdministrator === true;
   }
 
   async health(): Promise<ProviderHealth> {

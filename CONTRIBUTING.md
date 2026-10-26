@@ -40,17 +40,17 @@ applies to more than one shell.
 ```bash
 git clone https://github.com/reclinarr/reclinarr.git
 cd reclinarr
-cp .env.example .env
-npm install
+make setup
 ```
 
-Fill in `.env` with your Jellyfin, Seerr, and Dispatcharr endpoints (or set
-`RECLINARR_USE_MOCKS=true` for UI-only work without backends).
+Configure Jellyfin, Seerr, and Dispatcharr in the setup wizard, or in a root
+`.env` (see `.env.example`; its values override the wizard). Run `make dev-mock`
+for UI-only work without backends. `make` lists every target.
 
 Start the local stack:
 
 ```bash
-npm run dev
+make dev
 ```
 
 - Web UI: http://localhost:5173
@@ -62,8 +62,8 @@ unless you are explicitly testing production.
 ### Native shells
 
 ```bash
-npm run start -w @reclinarr/mobile -- --port 8081
-npm run start -w @reclinarr/tv -- --port 8082
+make mobile
+make tv
 ```
 
 When both Metro servers run together, reverse the TV emulator port as described
@@ -74,24 +74,22 @@ in the [README](./README.md#development).
 Run what applies to your change:
 
 ```bash
-npm run typecheck
-npm test
-npm run lint
-npm run build
+make check
+make build
 ```
 
 Opt-in live Dispatcharr ranking tests (needs real credentials in `.env`):
 
 ```bash
-npm run test:live -w @reclinarr/providers
+make test-live
 ```
 
 UI e2e (Maestro) — keep API + web (and Metro for native) running:
 
 ```bash
-npm run test:e2e:web
-npm run test:e2e:ios -- --udid <IOS_SIMULATOR_UDID>
-npm run test:e2e:tv -- --udid <TV_EMULATOR_UDID>
+make e2e-web
+make e2e-ios UDID=<IOS_SIMULATOR_UDID>
+make e2e-tv UDID=<TV_EMULATOR_UDID>
 ```
 
 Web e2e uses `RECLINARR_TEST_USERNAME` / `RECLINARR_TEST_PASSWORD` (and optional

@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { resolvePreferredAction, type Media } from "@reclinarr/shared";
+import { isWatchedByAvailability, resolvePreferredAction, type Media } from "@reclinarr/shared";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { isDemoSession, requireAuth } from "../plugins/auth.js";
 import {
   resolveMediaAvailabilityByTmdb,
   resolveMediaByTmdb,
@@ -10,11 +10,42 @@ import {
 import { mergeSeriesEpisodes } from "../services/series-episodes.js";
 import { pickResumeEpisode } from "../services/pick-resume-episode.js";
 
+/** Overlay Reclinarr's own movie progress (IPTV / cache / Jellyfin-reported) on the catalogue media. */
+function withMovieWatchState(ctx: AppContext, userId: string, media: Media): Media {
+  if (media.identity.mediaType !== "movie" || media.identity.tmdbId == null) return media;
+  const progress = ctx.iptvProgress.get(userId, {
+    mediaType: "movie",
+    tmdbId: media.identity.tmdbId,
+  });
+  if (!progress) return media;
+  if (progress.completed) return { ...media, watched: true };
+  if (progress.positionSeconds <= 30) return media;
+  const hasProgress = media.availability.some(
+    (a) => "positionSeconds" in a && typeof a.positionSeconds === "number" && a.positionSeconds > 30,
+  );
+  if (hasProgress) return media;
+  const availability = [
+    ...media.availability.filter((a) => a.provider !== "dispatcharr"),
+    {
+      ...(media.availability.find((a) => a.provider === "dispatcharr") ?? {
+        provider: "dispatcharr" as const,
+        available: true,
+        canPlay: true,
+        candidates: [],
+      }),
+      positionSeconds: progress.positionSeconds,
+      ...(progress.durationSeconds != null ? { durationSeconds: progress.durationSeconds } : {}),
+    },
+  ];
+  return { ...media, availability, preferredAction: resolvePreferredAction(availability) };
+}
+
 export async function registerMediaRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/media/jellyfin/:itemId", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext, session } = await requireAuth(req);
     const { itemId } = z.object({ itemId: z.string().min(1) }).parse(req.params);
-    const media = await ctx.jellyfin.getByJellyfinItemId(userContext, itemId);
+    const jellyfinMedia = await ctx.jellyfin.getByJellyfinItemId(userContext, itemId);
+    const media = jellyfinMedia && withMovieWatchState(ctx, session.jellyfinUserId, jellyfinMedia);
     if (!media) {
       const err = new Error("Not found") as Error & { statusCode: number };
       err.statusCode = 404;
@@ -52,7 +83,8 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: AppContext)
 
   // More specific than /api/media/:type/:tmdbId — register first.
   app.get("/api/media/:type/:tmdbId/similar", async (req) => {
-    await requireAuth(req);
+    const { session } = await requireAuth(req);
+    if (isDemoSession(ctx, session)) return { items: [] as Media[] };
     const params = z
       .object({
         type: z.enum(["movie", "tv"]),
@@ -91,7 +123,7 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: AppContext)
   });
 
   app.get("/api/media/:type/:tmdbId", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext, session } = await requireAuth(req);
     const params = z
       .object({
         type: z.enum(["movie", "tv"]),
@@ -106,7 +138,7 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: AppContext)
       throw err;
     }
     return {
-      media: resolved.media,
+      media: withMovieWatchState(ctx, session.jellyfinUserId, resolved.media),
       iptvResolvePending: resolved.iptvResolvePending,
     };
   });
@@ -241,10 +273,22 @@ export async function registerMediaRoutes(app: FastifyInstance, ctx: AppContext)
       }),
     ];
 
+    const completedKeys = new Set(
+      ctx.iptvProgress
+        .listCompletedForSeries(session.jellyfinUserId, tmdbId)
+        .map((r) => `${r.seasonNumber}:${r.episodeNumber}`),
+    );
+    const itemsWithWatched = items.map((ep) => {
+      const watched =
+        completedKeys.has(`${ep.seasonNumber}:${ep.episodeNumber}`) ||
+        isWatchedByAvailability(ep.availability);
+      return watched ? { ...ep, watched } : ep;
+    });
+
     return {
       series,
       seasons,
-      items,
+      items: itemsWithWatched,
       /** Most recently watched in-progress episode, if any. */
       resumeEpisode: pickResumeEpisode(resumeCandidates),
     };

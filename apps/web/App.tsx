@@ -2,7 +2,7 @@ import { type JSX, useEffect, useState } from "react";
 import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { me } from "@reclinarr/client";
+import { me, syncPreferences } from "@reclinarr/client";
 import { AnalyticsConsentGate, BootSkeleton, colors } from "@reclinarr/native-ui";
 import { StatusBar } from "expo-status-bar";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -18,7 +18,7 @@ import {
   LoginScreen,
   MoviesScreen,
   PlayerScreen,
-  ProfileScreen,
+  SettingsScreen,
   RequestsScreen,
   SearchScreen,
   SeriesScreen,
@@ -49,6 +49,7 @@ function BootScreen() {
           return;
         }
         await me();
+        void syncPreferences().catch((err) => console.error("[preferences] sync failed", err));
         navigation.reset({ index: 0, routes: [{ name: "Home" }] });
       } catch {
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });
@@ -86,7 +87,7 @@ const Search = withUser(SearchScreen);
 const Live = withUser(LiveScreen);
 const Downloads = withUser(DownloadsScreen);
 const Requests = withUser(RequestsScreen);
-const Profile = withUser(ProfileScreen);
+const Settings = withUser(SettingsScreen);
 const Details = withUser((_p) => <DetailsScreen />);
 
 /**
@@ -143,7 +144,7 @@ export function App() {
           <Stack.Screen name="Live" component={Live} />
           <Stack.Screen name="Downloads" component={Downloads} />
           <Stack.Screen name="Requests" component={Requests} />
-          <Stack.Screen name="Profile" component={Profile} />
+          <Stack.Screen name="Settings" component={Settings} />
           <Stack.Screen
             name="Details"
             component={Details}

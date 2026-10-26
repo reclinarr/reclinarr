@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Nav } from "../nav";
-import { BrandLogo } from "@reclinarr/native-ui";
+import { AccentFill, BrandLogo } from "@reclinarr/native-ui";
 import { colors } from "../theme";
 
 export function ScreenHeader({
@@ -32,6 +32,7 @@ export function ScreenHeader({
           style={styles.profile}
           accessibilityLabel="Profile"
         >
+          <AccentFill />
           <Text style={styles.profileText}>{(username || "U").slice(0, 1).toUpperCase()}</Text>
         </Pressable>
       ) : (
@@ -64,9 +65,10 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
     backgroundColor: colors.accent,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
   profileSpacer: { width: 34 },
-  profileText: { color: colors.bg, fontWeight: "700" },
+  profileText: { color: colors.text, fontWeight: "700" },
 });

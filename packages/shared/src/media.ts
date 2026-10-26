@@ -59,6 +59,8 @@ export const JellyfinAvailabilitySchema = z.object({
   durationSeconds: z.number().optional(),
   /** ISO timestamp from Jellyfin UserData.LastPlayedDate when known. */
   lastPlayedAt: z.string().optional(),
+  /** Jellyfin UserData.Played. */
+  played: z.boolean().optional(),
 });
 export type JellyfinAvailability = z.infer<typeof JellyfinAvailabilitySchema>;
 
@@ -145,5 +147,7 @@ export const MediaSchema = z.object({
   metadata: MediaMetadataSchema,
   availability: z.array(AvailabilitySchema),
   preferredAction: PreferredActionSchema,
+  /** Movie fully watched per SQLite progress (Jellyfin `played` lives on its availability). */
+  watched: z.boolean().optional(),
 });
 export type Media = z.infer<typeof MediaSchema>;

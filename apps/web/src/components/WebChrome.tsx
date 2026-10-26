@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logout, searchMedia } from "@reclinarr/client";
-import { Artwork, BrandLogo, colors, openMedia, webGradient } from "@reclinarr/native-ui";
+import { AccentFill, Artwork, BrandLogo, colors, openMedia, useIsDemoUser, webGradient } from "@reclinarr/native-ui";
 import type { RootStackParamList } from "../nav";
 import { useWebLayout } from "../layout";
 import { clearSession } from "../session";
@@ -41,6 +41,7 @@ export function WebChrome({
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const { narrowHeader, compactHeader, logoSize } = layout;
+  const demo = useIsDemoUser();
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(searchValue.trim()), 400);
@@ -203,6 +204,7 @@ export function WebChrome({
               }}
             >
               <View style={styles.avatar}>
+                <AccentFill />
                 <Text style={styles.avatarText}>{initial}</Text>
               </View>
               {narrowHeader ? null : <Text style={styles.caret}>▾</Text>}
@@ -217,25 +219,27 @@ export function WebChrome({
                     navigation.navigate("Downloads");
                   }}
                 >
-                  <Text style={styles.menuText}>Downloads</Text>
+                  <Text style={styles.menuText}>Cache</Text>
                 </Pressable>
+                {demo ? null : (
+                  <Pressable
+                    style={styles.menuItem}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      navigation.navigate("Requests");
+                    }}
+                  >
+                    <Text style={styles.menuText}>Requests</Text>
+                  </Pressable>
+                )}
                 <Pressable
                   style={styles.menuItem}
                   onPress={() => {
                     setMenuOpen(false);
-                    navigation.navigate("Requests");
+                    navigation.navigate("Settings");
                   }}
                 >
-                  <Text style={styles.menuText}>Requests</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.menuItem}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    navigation.navigate("Profile");
-                  }}
-                >
-                  <Text style={styles.menuText}>Profile</Text>
+                  <Text style={styles.menuText}>Settings</Text>
                 </Pressable>
                 <Pressable style={styles.menuItem} onPress={() => void signOut()}>
                   <Text style={styles.menuText}>Sign out</Text>
@@ -352,10 +356,11 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 4,
     backgroundColor: colors.accent,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: colors.bg, fontWeight: "700", fontSize: 14 },
+  avatarText: { color: colors.text, fontWeight: "700", fontSize: 14 },
   caret: { color: "#fff", fontSize: 12 },
   menu: {
     position: "absolute",

@@ -175,7 +175,7 @@ export function Billboard({
           {download.state ? (
             <PillButton
               icon={download.state.kind === "download" ? "download" : undefined}
-              label={download.state.kind === "downloaded" ? "✓ Downloaded" : download.state.label}
+              label={download.state.kind === "downloaded" ? "✓ Cached" : download.state.label}
               tone="glass"
               progress={download.state.kind === "downloading" ? download.state.progress : undefined}
               onPress={download.start}

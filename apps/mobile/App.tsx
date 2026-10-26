@@ -4,7 +4,7 @@ import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@rea
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { me } from "@reclinarr/client";
+import { me, syncPreferences } from "@reclinarr/client";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MainTabParamList, Nav, RootStackParamList } from "./src/nav";
@@ -60,6 +60,7 @@ function BootScreen() {
         attachClient(url);
         try {
           await me();
+          void syncPreferences().catch((err) => console.error("[preferences] sync failed", err));
           if (!cancelled) navigation.reset({ index: 0, routes: [{ name: "Main" }] });
         } catch {
           if (!cancelled) navigation.reset({ index: 0, routes: [{ name: "Login" }] });

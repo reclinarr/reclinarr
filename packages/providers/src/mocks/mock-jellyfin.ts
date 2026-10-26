@@ -83,6 +83,10 @@ export class MockJellyfinProvider implements LibraryProvider, PlaybackProvider {
     return { id: this.id, status: "ok", message: "mock", capabilities: this.capabilities() };
   }
 
+  async isAdministrator(): Promise<boolean> {
+    return false;
+  }
+
   async authenticate() {
     return {
       userId: "mock-user",

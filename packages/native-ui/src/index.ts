@@ -1,5 +1,6 @@
 export { colors, type NativeColors } from "./theme.js";
 export { BrandLogo } from "./BrandLogo.js";
+export { AccentFill } from "./AccentFill.js";
 export { webBg, webGradient, textShadowStyle, HOVER_ROOM, FOCUS_ROOM } from "./webStyle.js";
 export { Shade } from "./Shade.js";
 export type { NativeLayout } from "./layout.js";
@@ -56,6 +57,7 @@ export { Focusable } from "./Focusable.js";
 export { AnalyticsConsentGate, AnalyticsConsentSettings } from "./AnalyticsConsent.js";
 export { PlaybackLanguageSettings } from "./PlaybackLanguageSettings.js";
 export { usePlayMedia } from "./hooks/usePlayMedia.js";
+export { useIsDemoUser } from "./hooks/useMediaRequest.js";
 export * from "./screens/index.js";
 export type { VideoSurfaceProps, VideoTransport } from "./player/VideoSurfaceProps.js";
 export { PlayerScreen } from "./player/PlayerScreen.js";

@@ -1,4 +1,5 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { AccentFill } from "../AccentFill.js";
 import { colors } from "../theme.js";
 
 /** Shared waiting state for web, iOS and Android TV video surfaces. */
@@ -23,7 +24,7 @@ export function BufferingOverlay({
       <Text style={styles.label}>{pct != null ? `Buffering… ${pct}%` : "Buffering…"}</Text>
       {pct != null ? (
         <View style={styles.track}>
-          <View style={[styles.fill, { width: `${pct}%` }]} />
+          <View style={[styles.fill, { width: `${pct}%` }]}><AccentFill /></View>
         </View>
       ) : null}
     </View>
@@ -56,5 +57,6 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 2,
     backgroundColor: colors.accent,
+    overflow: "hidden",
   },
 });

@@ -17,19 +17,31 @@ describe("Reclinarr configuration", () => {
     expect(config.RECLINARR_USE_MOCKS).toBe(true);
   });
 
-  it("accepts a production session secret", () => {
-    const secret = "existing-production-session-secret";
-    expect(loadConfig({ NODE_ENV: "production", RECLINARR_SESSION_SECRET: secret })
-      .RECLINARR_SESSION_SECRET).toBe(secret);
-  });
-
   it("defaults live transcode hardware selection to auto", () => {
     expect(loadConfig({}).RECLINARR_HWACCEL).toBe("auto");
     expect(() => loadConfig({ RECLINARR_HWACCEL: "cuda" })).toThrow();
   });
 
-  it("rejects an insecure production session secret", () => {
-    expect(() => loadConfig({ NODE_ENV: "production" }))
-      .toThrow("RECLINARR_SESSION_SECRET");
+  it("prefers environment variables over setup wizard values", () => {
+    const config = loadConfig(
+      { JELLYFIN_URL: "http://env-jellyfin:8096" },
+      { JELLYFIN_URL: "http://wizard-jellyfin:8096", SEERR_API_KEY: "wizard-key" },
+    );
+    expect(config.JELLYFIN_URL).toBe("http://env-jellyfin:8096");
+    expect(config.SEERR_API_KEY).toBe("wizard-key");
+  });
+
+  it("treats empty environment variables as unset", () => {
+    const config = loadConfig(
+      { JELLYFIN_URL: "", SEERR_API_KEY: "", HTTP_TIMEOUT_MS: "" },
+      { JELLYFIN_URL: "http://wizard-jellyfin:8096", SEERR_API_KEY: "wizard-key" },
+    );
+    expect(config.JELLYFIN_URL).toBe("http://wizard-jellyfin:8096");
+    expect(config.SEERR_API_KEY).toBe("wizard-key");
+    expect(config.HTTP_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it("rejects a public URL that is not a URL", () => {
+    expect(() => loadConfig({ RECLINARR_PUBLIC_URL: "reclinarr.example" })).toThrow();
   });
 });

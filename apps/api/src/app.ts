@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { ZodError } from "zod";
 import type { AppContext } from "./context.js";
 import { registerAuth } from "./plugins/auth.js";
+import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerHomeRoutes } from "./routes/home.js";
@@ -22,37 +23,32 @@ import { registerAcquisitionRoutes } from "./routes/acquisition.js";
 import { registerLiveRoutes } from "./routes/live.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerMyListRoutes } from "./routes/mylist.js";
+import { registerPreferencesRoutes } from "./routes/preferences.js";
 import { registerSetupRoutes } from "./routes/setup.js";
 import { registerTelemetryRoutes } from "./routes/telemetry.js";
 
-function corsOrigins(publicUrl: string): true | string[] {
-  try {
-    const u = new URL(publicUrl);
-    const origins = new Set<string>([u.origin]);
-    // Dev: Vite/Expo web often sits on 5173 while the API is on RECLINARR_PUBLIC_URL.
-    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
-      origins.add("http://localhost:5173");
-      origins.add("http://127.0.0.1:5173");
-      origins.add("http://localhost:8081");
-      origins.add("http://127.0.0.1:8081");
-      origins.add(`http://localhost:${u.port || "8787"}`);
-      origins.add(`http://127.0.0.1:${u.port || "8787"}`);
-    }
-    return [...origins];
-  } catch {
-    return true;
+function corsOrigins(publicUrl: string): string[] {
+  const u = new URL(publicUrl);
+  const origins = new Set<string>([u.origin]);
+  // Dev: Vite/Expo web often sits on 5173 while the API is on RECLINARR_PUBLIC_URL.
+  if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+    origins.add("http://localhost:5173");
+    origins.add("http://127.0.0.1:5173");
+    origins.add("http://localhost:8081");
+    origins.add("http://127.0.0.1:8081");
+    origins.add(`http://localhost:${u.port || "8787"}`);
+    origins.add(`http://127.0.0.1:${u.port || "8787"}`);
   }
+  return [...origins];
 }
 
-export async function buildApp(ctx: AppContext) {
+export async function buildApp(ctx: AppContext, opts: { onSetupSaved: () => void }) {
   const requestStarted = new WeakMap<object, bigint>();
   const app = Fastify({
     logger: {
       level: "info",
       redact: {
         paths: [
-          "req.headers.authorization",
-          "req.headers.cookie",
           "*.password",
           "*.accessToken",
           "*.jellyfinAccessToken",
@@ -60,17 +56,29 @@ export async function buildApp(ctx: AppContext) {
         ],
         remove: true,
       },
+      serializers: {
+        // Query strings can carry ?reclinarr_session= (TV artwork), so log the path only.
+        req: (req) => ({
+          method: req.method,
+          url: req.url.split("?")[0],
+          host: req.host,
+          remoteAddress: req.ip,
+          remotePort: req.socket?.remotePort,
+        }),
+      },
     },
     genReqId: () => randomUUID(),
+    trustProxy: [
+      "loopback",
+      ...ctx.config.RECLINARR_TRUSTED_PROXIES.split(",").map((s) => s.trim()).filter(Boolean),
+    ],
   });
 
   await app.register(cors, {
     origin: corsOrigins(ctx.config.RECLINARR_PUBLIC_URL),
     credentials: true,
   });
-  await app.register(cookie, {
-    secret: ctx.config.RECLINARR_SESSION_SECRET,
-  });
+  await app.register(cookie);
   await app.register(rateLimit, {
     global: false,
   });
@@ -81,14 +89,20 @@ export async function buildApp(ctx: AppContext) {
     const distinctId = Array.isArray(header) ? header[0] : header;
     const platformHeader = req.headers["x-reclinarr-client-platform"];
     const versionHeader = req.headers["x-reclinarr-client-version"];
+    const sessionHeader = req.headers["x-reclinarr-telemetry-session"];
+    const deviceHeader = req.headers["x-reclinarr-client-device"];
     const platform = Array.isArray(platformHeader) ? platformHeader[0] : platformHeader;
     const appVersion = Array.isArray(versionHeader) ? versionHeader[0] : versionHeader;
+    const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+    const deviceType = Array.isArray(deviceHeader) ? deviceHeader[0] : deviceHeader;
     ctx.telemetry.runWithDistinctId(
       typeof distinctId === "string" ? distinctId : null,
       done,
       {
         ...(typeof platform === "string" ? { platform } : {}),
         ...(typeof appVersion === "string" ? { appVersion } : {}),
+        ...(typeof sessionId === "string" ? { sessionId } : {}),
+        ...(typeof deviceType === "string" ? { deviceType } : {}),
       },
     );
   });
@@ -111,8 +125,9 @@ export async function buildApp(ctx: AppContext) {
 
   await registerAuth(app, ctx);
   await registerHealthRoutes(app, ctx);
-  await registerSetupRoutes(app, ctx);
+  await registerSetupRoutes(app, ctx, opts.onSetupSaved);
   await registerTelemetryRoutes(app, ctx);
+  await registerAdminRoutes(app, ctx, opts.onSetupSaved);
   await registerAuthRoutes(app, ctx);
   await registerHomeRoutes(app, ctx);
   await registerMediaRoutes(app, ctx);
@@ -123,6 +138,7 @@ export async function buildApp(ctx: AppContext) {
   await registerLibraryRoutes(app, ctx);
   await registerLiveRoutes(app, ctx);
   await registerMyListRoutes(app, ctx);
+  await registerPreferencesRoutes(app, ctx);
   await registerPlaybackRoutes(app, ctx);
   await registerImageRoutes(app, ctx);
 

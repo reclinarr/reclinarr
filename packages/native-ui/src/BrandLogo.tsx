@@ -1,5 +1,6 @@
+import { useId } from "react";
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { colors } from "./theme.js";
 
 // Capital R with a play triangle cut out of its upper bowl.
@@ -16,10 +17,17 @@ export function BrandLogo({
   markOnly?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const gradientId = `brand-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <View accessible accessibilityRole="image" accessibilityLabel="Reclinarr" style={[styles.logo, style]}>
       <Svg width={size} height={size} viewBox="16 16 68 68">
-        <Path d={MARK} fill={colors.accent} fillRule="evenodd" />
+        <Defs>
+          <LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0" stopColor={colors.accentFrom} />
+            <Stop offset="1" stopColor={colors.accentTo} />
+          </LinearGradient>
+        </Defs>
+        <Path d={MARK} fill={`url(#${gradientId})`} fillRule="evenodd" />
       </Svg>
       {markOnly ? null : (
         <Text accessible={false} style={[styles.wordmark, { fontSize: size * 0.95 }]}>
@@ -32,6 +40,6 @@ export function BrandLogo({
 
 const styles = StyleSheet.create({
   logo: { flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 0 },
-  wordmark: { color: "#fff8eb", fontWeight: "800", letterSpacing: -0.6 },
+  wordmark: { color: "#f7f2ff", fontWeight: "800", letterSpacing: -0.6 },
   suffix: { color: colors.accent },
 });

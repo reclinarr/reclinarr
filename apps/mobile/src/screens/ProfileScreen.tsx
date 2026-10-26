@@ -1,5 +1,4 @@
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
 import { logout, me } from "@reclinarr/client";
@@ -36,13 +35,17 @@ export function ProfileScreen() {
       <ScreenHeader title="Profile" showBack />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.body}>
         <Text style={styles.name}>{username || "Signed in"}</Text>
-        <Text style={styles.copy}>Downloads, requests, and playback languages.</Text>
-        <PlaybackLanguageSettings storage={AsyncStorage} />
+        <Text style={styles.copy}>Cache, requests, and playback languages.</Text>
+        <PlaybackLanguageSettings />
         {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
-        <Button label="Downloads" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
+        <Button label="Cache" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
         <View style={{ height: 10 }} />
-        <Button label="Requests" variant="ghost" onPress={() => navigation.navigate("Requests")} />
-        <View style={{ height: 10 }} />
+        {session.data?.user.demo ? null : (
+          <>
+            <Button label="Requests" variant="ghost" onPress={() => navigation.navigate("Requests")} />
+            <View style={{ height: 10 }} />
+          </>
+        )}
         <Button
           label="Change server"
           variant="ghost"

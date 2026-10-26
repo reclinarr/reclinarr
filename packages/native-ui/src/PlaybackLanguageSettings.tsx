@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  loadAudioLanguagePref,
-  loadSubtitlePref,
-  saveAudioLanguagePref,
-  saveSubtitleOff,
-  saveSubtitlePref,
-  type KeyValueStorage,
-} from "@reclinarr/client";
+import { getClient, trackFeature } from "@reclinarr/client";
 import { normalizeSubtitleLanguage } from "@reclinarr/shared";
 import { isTvFocused } from "./focus.js";
 import { colors } from "./theme.js";
@@ -40,48 +33,68 @@ function optionsFor(selected: string | null): Array<{ code: string; label: strin
   return [...LANGUAGES, { code: selected, label: selected.toUpperCase() }];
 }
 
-export function PlaybackLanguageSettings({ storage }: { storage: KeyValueStorage }) {
+export function PlaybackLanguageSettings() {
   const [ready, setReady] = useState(false);
   const [audio, setAudio] = useState<string | null>(null);
   const [subtitles, setSubtitles] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([loadAudioLanguagePref(storage), loadSubtitlePref(storage)]).then(
-      ([audioPref, subtitlePref]) => {
+    getClient()
+      .syncPreferences()
+      .then((prefs) => {
         if (cancelled) return;
-        setAudio(audioPref);
+        setAudio(prefs.audioLanguage);
         setSubtitles(
-          subtitlePref.mode === "on"
-            ? normalizeSubtitleLanguage(subtitlePref.language) || null
+          prefs.subtitles.mode === "on"
+            ? normalizeSubtitleLanguage(prefs.subtitles.language) || null
             : null,
         );
         setReady(true);
-      },
-    );
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
     return () => {
       cancelled = true;
     };
-  }, [storage]);
+  }, []);
 
   async function chooseAudio(next: string | null) {
+    const previous = audio;
     setAudio(next);
-    await saveAudioLanguagePref(next, storage);
+    setError(null);
+    try {
+      await getClient().updatePreferences({ audioLanguage: next });
+      trackFeature("audio_language_change");
+    } catch (err) {
+      setAudio(previous);
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function chooseSubtitles(next: string | null) {
+    const previous = subtitles;
     setSubtitles(next);
-    if (!next) {
-      await saveSubtitleOff(storage);
-      return;
+    setError(null);
+    try {
+      await getClient().updatePreferences({
+        subtitles: next ? { mode: "on", language: next } : { mode: "off" },
+      });
+      trackFeature("subtitle_change");
+    } catch (err) {
+      setSubtitles(previous);
+      setError(err instanceof Error ? err.message : String(err));
     }
-    await saveSubtitlePref({ mode: "on", language: next }, storage);
   }
 
+  if (error && !ready) return <Text style={styles.error}>Couldn't load language settings: {error}</Text>;
   if (!ready) return null;
 
   return (
     <View style={styles.wrap}>
+      {error ? <Text style={styles.error}>Couldn't save: {error}</Text> : null}
       <View style={styles.setting}>
         <Text style={styles.title}>Preferred audio</Text>
         <Text style={styles.copy}>
@@ -148,10 +161,11 @@ function Choice({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 8 },
-  setting: { gap: 10, paddingVertical: 12 },
+  wrap: { flexDirection: "row", flexWrap: "wrap", columnGap: 40, rowGap: 8 },
+  setting: { gap: 10, paddingVertical: 12, flexGrow: 1, flexBasis: 340 },
   title: { color: colors.text, fontSize: 16, fontWeight: "700" },
   copy: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  error: { color: "#e87c03", fontSize: 14, lineHeight: 20, width: "100%" },
   choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     minHeight: 40,
@@ -165,5 +179,5 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: colors.accent },
   chipFocused: { borderColor: colors.text },
   chipText: { color: colors.text, fontSize: 14, fontWeight: "700" },
-  chipTextSelected: { color: "#141414" },
+  chipTextSelected: { color: colors.text },
 });

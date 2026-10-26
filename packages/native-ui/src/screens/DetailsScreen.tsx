@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isWatchedByAvailability, pickNextUpEpisode } from "@reclinarr/shared";
 import type { Acquisition, CreditPerson, EpisodeListItem, Media, MediaIdentity } from "@reclinarr/shared";
 import {
   actionLabel,
@@ -28,7 +29,6 @@ import {
   mediaSimilar,
   myListHas,
   primaryAction,
-  promoteAcquisition,
   requestMedia,
   resolvePlaybackForPlay,
   seriesEpisodes,
@@ -39,12 +39,13 @@ import { Artwork } from "../Artwork.js";
 import { Button, PillButton } from "../Button.js";
 import { isTvFocused, usePreferredFocusOnce } from "../focus.js";
 import { HScroll } from "../HScroll.js";
-import { useMediaRequest } from "../hooks/useMediaRequest.js";
+import { useIsDemoUser, useMediaRequest } from "../hooks/useMediaRequest.js";
 import { acquisitionProgressPercent, matchAcquisition, useTitleDownload } from "../hooks/useTitleDownload.js";
-import { DownloadIcon, PlayIcon } from "../icons.js";
+import { CheckIcon, DownloadIcon, PlayIcon } from "../icons.js";
 import { MediaRail } from "../MediaRail.js";
 import { NfBackIcon } from "../player/PlayerIcons.js";
 import { DetailsModalSkeleton, DetailsSkeleton, EpisodeListSkeleton, SkeletonBlock } from "../Skeleton.js";
+import { AccentFill } from "../AccentFill.js";
 import { colors } from "../theme.js";
 import type { NativeLayout } from "../layout.js";
 import {
@@ -207,11 +208,14 @@ function EpisodeStillThumb({
   disabled = false,
   /** When the parent episode row is focused on TV — don't nest a second focus target. */
   forceHot = false,
+  /** 0–1 watched fraction for a partially watched episode. */
+  progress,
 }: {
   url?: string;
   onPress: () => void;
   disabled?: boolean;
   forceHot?: boolean;
+  progress?: number;
 }) {
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -235,8 +239,33 @@ function EpisodeStillThumb({
           </View>
         </View>
       ) : null}
+      {progress != null ? (
+        <View style={styles.epProgress}>
+          <View style={[styles.epProgressFill, { width: `${Math.round(progress * 100)}%` }]}><AccentFill /></View>
+        </View>
+      ) : null}
     </Pressable>
   );
+}
+
+function watchProgressFraction(item: {
+  watched?: boolean;
+  availability: EpisodeListItem["availability"];
+}): number | undefined {
+  if (item.watched) return undefined;
+  for (const a of item.availability) {
+    if (
+      "positionSeconds" in a &&
+      "durationSeconds" in a &&
+      typeof a.positionSeconds === "number" &&
+      typeof a.durationSeconds === "number" &&
+      a.durationSeconds > 0 &&
+      a.positionSeconds > 30
+    ) {
+      return Math.min(1, a.positionSeconds / a.durationSeconds);
+    }
+  }
+  return undefined;
 }
 
 type EpisodeDownloadKind = "acquire" | "request" | "pending" | "ready" | "downloading";
@@ -368,11 +397,11 @@ function EpisodeDownloadButton({
         ? "Requested"
         : downloading
           ? progressPercent != null
-            ? `Downloading ${progressPercent}%`
-            : "Downloading"
+            ? `Caching ${progressPercent}%`
+            : "Caching"
           : kind === "acquire"
-            ? "Download"
-            : "Request download";
+            ? "Cache"
+            : "Request";
   return (
     <Pressable
       onPress={onPress}
@@ -419,7 +448,7 @@ function SeasonDownloadPicker({
     .reduce((sum, o) => sum + o.downloadable, 0);
   return (
     <View style={styles.pickerPanel}>
-      <Text style={styles.pickerTitle}>Download seasons</Text>
+      <Text style={styles.pickerTitle}>Cache seasons</Text>
       <View style={styles.pickerChips}>
         {options.map((o) => {
           const done = o.downloadable === 0;
@@ -450,7 +479,7 @@ function SeasonDownloadPicker({
                       {name}
                     </Text>
                     <Text style={[styles.pickerChipMeta, (on || focused) && styles.pickerChipTextOn]}>
-                      {done ? "Downloaded" : `${o.downloadable} ep${o.downloadable === 1 ? "" : "s"}`}
+                      {done ? "Cached" : `${o.downloadable} ep${o.downloadable === 1 ? "" : "s"}`}
                     </Text>
                   </>
                 );
@@ -462,7 +491,7 @@ function SeasonDownloadPicker({
       <View style={styles.pickerActions}>
         <PillButton
           icon="download"
-          label={episodeCount ? `Download ${episodeCount} episode${episodeCount === 1 ? "" : "s"}` : "Pick a season"}
+          label={episodeCount ? `Cache ${episodeCount} episode${episodeCount === 1 ? "" : "s"}` : "Pick a season"}
           tone="light"
           onPress={() => {
             if (episodeCount) onConfirm();
@@ -543,6 +572,7 @@ export function DetailsScreen({
   });
 
   const requestFlow = useMediaRequest(availabilityQuery.data?.media ?? details.data?.media);
+  const demo = useIsDemoUser();
   const media: Media | undefined = requestFlow.media ?? undefined;
   const iptvResolving =
     !isJellyfin &&
@@ -676,19 +706,6 @@ export function DetailsScreen({
     });
   }, [episodesQuery.data?.seasons]);
 
-  useEffect(() => {
-    if (!seasons.length) return;
-    if (season !== null && seasons.includes(season)) return;
-    // Prefer the Continue Watching / hero episode's season when opening details.
-    const initialSeason = focusEpisode?.seasonNumber ?? episodesQuery.data?.resumeEpisode?.seasonNumber;
-    if (initialSeason != null && seasons.includes(initialSeason)) {
-      setSeason(initialSeason);
-      return;
-    }
-    // Default to the first regular season, not TMDb specials (season 0).
-    setSeason(seasons.find((s) => s > 0) ?? seasons[0]!);
-  }, [seasons, season, focusEpisode, episodesQuery.data?.resumeEpisode?.seasonNumber]);
-
   const seasonEpisodes = useMemo(() => {
     const items = episodesQuery.data?.items ?? [];
     const filtered = season === null ? items : items.filter((e) => e.seasonNumber === season);
@@ -736,7 +753,73 @@ export function DetailsScreen({
     return items.find(withProgress);
   }, [episodesQuery.data?.items, episodesQuery.data?.resumeEpisode, focusEpisode]);
 
-  const playTarget = resumeEpisode ?? (isTv
+  /** Nothing in progress: the episode the user opened, else the next unwatched one after their furthest watched. */
+  const nextUpEpisode = useMemo(() => {
+    if (resumeEpisode) return null;
+    return pickNextUpEpisode(episodesQuery.data?.items ?? [], canPlayMedia, focusEpisode);
+  }, [episodesQuery.data?.items, resumeEpisode, focusEpisode]);
+
+  /** The episode Play acts on, and the row highlighted in the list. */
+  const episodeTarget = resumeEpisode ?? nextUpEpisode;
+  const selectedEpisode = useMemo(() => {
+    if (focusEpisode) {
+      const focused = (episodesQuery.data?.items ?? []).find(
+        (ep) =>
+          ep.seasonNumber === focusEpisode.seasonNumber &&
+          ep.episodeNumber === focusEpisode.episodeNumber,
+      );
+      if (focused) return focused;
+    }
+    return episodeTarget;
+  }, [episodesQuery.data?.items, focusEpisode, episodeTarget]);
+
+  useEffect(() => {
+    if (!seasons.length) return;
+    if (season !== null && seasons.includes(season)) return;
+    const initialSeason =
+      selectedEpisode?.seasonNumber ??
+      focusEpisode?.seasonNumber ??
+      episodesQuery.data?.resumeEpisode?.seasonNumber;
+    if (initialSeason != null && seasons.includes(initialSeason)) {
+      setSeason(initialSeason);
+      return;
+    }
+    // Default to the first regular season, not TMDb specials (season 0).
+    setSeason(seasons.find((s) => s > 0) ?? seasons[0]!);
+  }, [seasons, season, selectedEpisode, focusEpisode, episodesQuery.data?.resumeEpisode?.seasonNumber]);
+
+  const detailsScrollRef = useRef<ScrollView>(null);
+  const scrollContentRef = useRef<View>(null);
+  const selectedRowRef = useRef<View>(null);
+  const selectedRowKey = selectedEpisode
+    ? `${selectedEpisode.seasonNumber}:${selectedEpisode.episodeNumber}`
+    : null;
+  const scrolledToKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (tv || !selectedEpisode || selectedRowKey === scrolledToKey.current) return;
+    if (season !== selectedEpisode.seasonNumber) return;
+    const scroll = detailsScrollRef.current;
+    const row = selectedRowRef.current;
+    if (!scroll || !row) return;
+    scrolledToKey.current = selectedRowKey;
+    if (Platform.OS === "web") {
+      const container = (scroll as unknown as { getScrollableNode(): HTMLElement }).getScrollableNode();
+      const rowEl = row as unknown as HTMLElement;
+      const top =
+        rowEl.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      container.scrollTo({ top: Math.max(0, top - container.clientHeight / 3) });
+      return;
+    }
+    const content = scrollContentRef.current;
+    if (!content) return;
+    row.measureLayout(content, (_x, y) => {
+      scroll.scrollTo({ y: Math.max(0, y - 120), animated: false });
+    });
+  }, [tv, selectedEpisode, selectedRowKey, season]);
+
+  const playTarget = episodeTarget ?? (isTv
     ? episodesQuery.data?.items.find((episode) => episode.seasonNumber > 0 && canPlayMedia(episode)) ??
       episodesQuery.data?.items.find(canPlayMedia)
     : null);
@@ -807,7 +890,7 @@ export function DetailsScreen({
       if (kind === "ready" || kind === "pending" || kind === "downloading") return kind;
       if (kind === "acquire") {
         const iptv = ep.availability.find((a) => a.provider === "dispatcharr");
-        if (!iptv?.uuid) throw new Error("No IPTV source to download");
+        if (!iptv?.uuid) throw new Error("No IPTV source to cache");
         await startAcquisition({
           identity: ep.identity,
           mode: "cache",
@@ -851,7 +934,7 @@ export function DetailsScreen({
       if (kind === "ready" || kind === "pending" || kind === "downloading") return kind;
       if (kind === "acquire") {
         const iptv = media.availability.find((a) => a.provider === "dispatcharr");
-        if (!iptv?.uuid) throw new Error("No IPTV source to download");
+        if (!iptv?.uuid) throw new Error("No IPTV source to cache");
         await startAcquisition({
           identity: media.identity,
           mode: "cache",
@@ -896,11 +979,15 @@ export function DetailsScreen({
 
   const canResume = Boolean(resumeEpisode) || (media != null && /Resume/i.test(actionLabel(media)));
   const resolvingEpisodes = Boolean(isTv && seriesTmdbId && !isEpisode && episodesQuery.isPending);
+  /** Play vs Request isn't known yet: the primary button shows a skeleton. */
+  const actionsResolving = iptvResolving || resolvingEpisodes;
   const primaryLabel = !media || iptvResolving || resolvingEpisodes
     ? "Resolving…"
     : play.isPending || playEpisode.isPending
       ? bufferStatus || "Resolving…"
-      : canResume
+      : demo && !canPlayMedia(actionMedia!)
+        ? "Not available"
+        : canResume
         ? actionMedia?.preferredAction === "PLAY_IPTV" ? "Resume on demand" : "Resume"
         : actionLabel(actionMedia!).replace(/^▶\s*/, "");
   const playable = Boolean(actionMedia && canPlayMedia(actionMedia));
@@ -956,7 +1043,7 @@ export function DetailsScreen({
     .map((row) => episodeKey(row.ep));
   const batchKeys = seriesBatch.length ? seriesBatch : activeSeriesKeys;
   const seriesDownloadPill = (() => {
-    if (!isTv || isEpisode || iptvResolving || !seasonDownloadOptions.length) return null;
+    if (demo || !isTv || isEpisode || iptvResolving || !seasonDownloadOptions.length) return null;
     if (batchKeys.length) {
       const rows = seriesEpisodeRows.filter((row) => batchKeys.includes(episodeKey(row.ep)));
       const percents = rows.map((row) =>
@@ -964,21 +1051,21 @@ export function DetailsScreen({
       );
       const done = rows.filter((row) => row.kind === "ready").length;
       if (rows.length && done === rows.length) {
-        return { kind: "downloaded" as const, label: "✓ Downloaded" };
+        return { kind: "downloaded" as const, label: "✓ Cached" };
       }
       const progress = percents.length
         ? Math.round(percents.reduce((sum, p) => sum + p, 0) / percents.length)
         : 0;
       return {
         kind: "downloading" as const,
-        label: `Downloading ${done}/${rows.length}`,
+        label: `Caching ${done}/${rows.length}`,
         progress,
       };
     }
     if (seasonDownloadOptions.every((s) => s.downloadable === 0)) {
-      return { kind: "downloaded" as const, label: "✓ Downloaded" };
+      return { kind: "downloaded" as const, label: "✓ Cached" };
     }
-    return { kind: "download" as const, label: "Download" };
+    return { kind: "download" as const, label: "Cache" };
   })();
 
   const downloadSeasons = useMutation({
@@ -1018,6 +1105,11 @@ export function DetailsScreen({
       ? { kind: "downloading" as const, label: "Queuing…", progress: null }
       : seriesDownloadPill
     : titleDownload.state;
+  /** Whether a Download pill applies (and its state) isn't known yet: its slot shows a skeleton. */
+  const downloadLoading = isTv
+    ? !demo && !isEpisode && (actionsResolving || (seasonDownloadOptions.length > 0 && acquisitionsQuery.isPending))
+    : iptvResolving || titleDownload.loading;
+  const downloadBusy = downloadSeasons.isPending || titleDownload.pending;
   const onDownloadPillPress = () => {
     if (!isTv) return titleDownload.start();
     if (downloadPill?.kind !== "download") return;
@@ -1067,6 +1159,7 @@ export function DetailsScreen({
     if (!isTv) {
       const runtime = episodeRuntime(media.metadata.runtimeMinutes);
       const stillUrl = media.metadata.backdropUrl || media.metadata.posterUrl;
+      const movieWatched = Boolean(media.watched) || isWatchedByAvailability(media.availability);
       const movieAcq = matchAcquisition(acquisitionItems, media.identity);
       const movieDl = episodeDownloadKind(media.availability, media.preferredAction, movieAcq);
       const moviePct =
@@ -1103,12 +1196,21 @@ export function DetailsScreen({
                     }}
                     disabled={playbackDisabled}
                     forceHot={tv && isTvFocused(state)}
+                    progress={watchProgressFraction({
+                      watched: movieWatched,
+                      availability: media.availability,
+                    })}
                   />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={styles.epTitleRow}>
                       <Text style={[styles.episodeTitle, { flex: 1 }]} numberOfLines={1}>
                         {media.metadata.title}
                       </Text>
+                      {movieWatched ? (
+                        <View style={styles.epWatched} accessibilityLabel="Watched">
+                          <CheckIcon color="#a3a3a3" size={14} />
+                        </View>
+                      ) : null}
                       {runtime ? <Text style={styles.epRuntime}>{runtime}</Text> : null}
                     </View>
                     {media.metadata.overview ? (
@@ -1120,13 +1222,15 @@ export function DetailsScreen({
                 </>
               )}
             </Pressable>
-            <EpisodeDownloadButton
-              kind={movieDl}
-              busy={downloadTitle.isPending}
-              progressPercent={moviePct}
-              showFocusRing={tv}
-              onPress={() => downloadTitle.mutate()}
-            />
+            {demo ? null : (
+              <EpisodeDownloadButton
+                kind={movieDl}
+                busy={downloadTitle.isPending}
+                progressPercent={moviePct}
+                showFocusRing={tv}
+                onPress={() => downloadTitle.mutate()}
+              />
+            )}
           </View>
         </View>
       );
@@ -1206,8 +1310,14 @@ export function DetailsScreen({
             ep.episodeNumber === initialFocusEpisode.episodeNumber;
           const playBlocked =
             !canPlayMedia(ep) || playEpisode.isPending || play.isPending;
+          const isSelectedRow = selectedRowKey === `${ep.seasonNumber}:${ep.episodeNumber}`;
           return (
-            <View key={`${ep.seasonNumber}-${ep.episodeNumber}`} style={styles.epRow} collapsable={false}>
+            <View
+              key={`${ep.seasonNumber}-${ep.episodeNumber}`}
+              ref={isSelectedRow ? selectedRowRef : undefined}
+              style={[styles.epRow, isSelectedRow && styles.epRowSelected]}
+              collapsable={false}
+            >
               <Pressable
                 onPress={() => {
                   if (playBlocked) return;
@@ -1234,12 +1344,18 @@ export function DetailsScreen({
                       }}
                       disabled={playBlocked}
                       forceHot={tv && isTvFocused(state)}
+                      progress={watchProgressFraction(ep)}
                     />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <View style={styles.epTitleRow}>
                         <Text style={[styles.episodeTitle, { flex: 1 }]} numberOfLines={1}>
                           {ep.episodeNumber}. {ep.title}
                         </Text>
+                        {ep.watched ? (
+                          <View style={styles.epWatched} accessibilityLabel="Watched">
+                            <CheckIcon color="#a3a3a3" size={14} />
+                          </View>
+                        ) : null}
                         {runtime ? <Text style={styles.epRuntime}>{runtime}</Text> : null}
                       </View>
                       {ep.overview ? (
@@ -1251,17 +1367,19 @@ export function DetailsScreen({
                   </>
                 )}
               </Pressable>
-              <EpisodeDownloadButton
-                kind={dlKind}
-                busy={
-                  downloadEpisode.isPending &&
-                  downloadEpisode.variables?.seasonNumber === ep.seasonNumber &&
-                  downloadEpisode.variables?.episodeNumber === ep.episodeNumber
-                }
-                progressPercent={dlPct}
-                showFocusRing={tv}
-                onPress={() => downloadEpisode.mutate(ep)}
-              />
+              {demo ? null : (
+                <EpisodeDownloadButton
+                  kind={dlKind}
+                  busy={
+                    downloadEpisode.isPending &&
+                    downloadEpisode.variables?.seasonNumber === ep.seasonNumber &&
+                    downloadEpisode.variables?.episodeNumber === ep.episodeNumber
+                  }
+                  progressPercent={dlPct}
+                  showFocusRing={tv}
+                  onPress={() => downloadEpisode.mutate(ep)}
+                />
+              )}
             </View>
           );
         })}
@@ -1290,6 +1408,7 @@ export function DetailsScreen({
         />
         <View style={[styles.modalCard, { width: modalW, height: modalH }]}>
           <ScrollView
+            ref={detailsScrollRef}
             style={styles.modalScroll}
             contentContainerStyle={{ paddingBottom: 48 }}
             showsVerticalScrollIndicator
@@ -1318,6 +1437,7 @@ export function DetailsScreen({
                           label={requestAction.label}
                           tone="light"
                           progress={requestProgress}
+                          busy={requestFlow.pending}
                           onPress={onRequestPress}
                           showFocusRing
                           hasTVPreferredFocus={primaryFocus.prefer}
@@ -1331,6 +1451,7 @@ export function DetailsScreen({
                           icon="play"
                           label={primaryLabel}
                           tone="light"
+                          loading={actionsResolving}
                           onPress={() => play.mutate()}
                           disabled={playbackDisabled}
                           showFocusRing
@@ -1341,12 +1462,23 @@ export function DetailsScreen({
                           onBlur={primaryFocus.onBlur}
                         />
                       )}
-                      {downloadPill ? (
+                      {downloadLoading ? (
+                        <PillButton
+                          icon="download"
+                          label="Cache"
+                          tone="glass"
+                          loading
+                          disabled
+                          onPress={onDownloadPillPress}
+                          showFocusRing={tv}
+                        />
+                      ) : downloadPill ? (
                         <PillButton
                           icon={downloadPill.kind === "download" ? "download" : undefined}
-                          label={downloadPill.kind === "downloaded" ? "✓ Downloaded" : downloadPill.label}
+                          label={downloadPill.kind === "downloaded" ? "✓ Cached" : downloadPill.label}
                           tone="glass"
                           progress={downloadPill.kind === "downloading" ? downloadPill.progress : undefined}
+                          busy={downloadBusy}
                           onPress={onDownloadPillPress}
                           showFocusRing={tv}
                         />
@@ -1386,20 +1518,20 @@ export function DetailsScreen({
                         <Text style={styles.webTagline}>{media.metadata.tagline}</Text>
                       ) : null}
                       {/* Netflix: Resume stays plain; S1:E2 "Title" sits under the meta. */}
-                      {resumeEpisode ? (
+                      {episodeTarget ? (
                         <Text style={styles.webResumeEp}>
                           <Text style={styles.webResumeEpCode}>
-                            {`S${resumeEpisode.seasonNumber}:E${resumeEpisode.episodeNumber}`}
+                            {`S${episodeTarget.seasonNumber}:E${episodeTarget.episodeNumber}`}
                           </Text>
-                          {resumeEpisode.title ? (
-                            <Text style={styles.webResumeEpTitle}>{` "${resumeEpisode.title}"`}</Text>
+                          {episodeTarget.title ? (
+                            <Text style={styles.webResumeEpTitle}>{` "${episodeTarget.title}"`}</Text>
                           ) : null}
                         </Text>
                       ) : null}
                       {/* Movies put the synopsis on the episode-style row below (Netflix). */}
-                      {isTv && (resumeEpisode?.overview || media.metadata.overview) ? (
+                      {isTv && (episodeTarget?.overview || media.metadata.overview) ? (
                         <Text style={styles.webOverview} numberOfLines={4}>
-                          {resumeEpisode?.overview || media.metadata.overview}
+                          {episodeTarget?.overview || media.metadata.overview}
                         </Text>
                       ) : null}
                       {bufferStatus ? <Text style={styles.buffer}>{bufferStatus}</Text> : null}
@@ -1407,20 +1539,11 @@ export function DetailsScreen({
                       {availabilityLabel ? <Text style={styles.webMeta}>{availabilityLabel}</Text> : null}
                       {actionErrorText ? <Text accessibilityRole="alert" style={styles.error}>{actionErrorText}</Text> : null}
                       <View style={[styles.actions, { marginTop: 14 }]}>
-                        {acquisitionId &&
-                        (acquisition.data?.item.state === "completed" ||
-                          acquisition.data?.item.state === "playable") ? (
-                          <Button
-                            label="Add to library"
-                            variant="ghost"
-                            onPress={() => promoteAcquisition(acquisitionId).then(() => qc.invalidateQueries())}
-                          />
-                        ) : null}
-                        {acquisitionId &&
+                        {!demo && acquisitionId &&
                         (acquisition.data?.item.state === "downloading" ||
                           acquisition.data?.item.state === "queued") ? (
                           <Button
-                            label="Cancel download"
+                            label="Stop caching"
                             variant="ghost"
                             onPress={() => cancelAcquisition(acquisitionId)}
                           />
@@ -1520,7 +1643,8 @@ export function DetailsScreen({
 
   return (
     <View style={[styles.root, { paddingTop }]}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView ref={detailsScrollRef} contentContainerStyle={styles.content}>
+        <View ref={scrollContentRef} collapsable={false}>
         {showSkeleton ? (
           <View style={styles.hero}>
             <DetailsSkeleton backdropH={220} />
@@ -1561,6 +1685,7 @@ export function DetailsScreen({
                 <Button
                   label={requestAction.label}
                   progress={requestProgress}
+                  busy={requestFlow.pending}
                   showFocusRing={tv}
                   hasTVPreferredFocus={tv && initialFocusEpisode == null ? true : undefined}
                   onPress={onRequestPress}
@@ -1568,34 +1693,36 @@ export function DetailsScreen({
               ) : (
                 <Button
                   label={primaryLabel}
+                  loading={actionsResolving}
                   showFocusRing={tv}
                   hasTVPreferredFocus={tv && initialFocusEpisode == null ? true : undefined}
                   onPress={() => play.mutate()}
                   disabled={playbackDisabled}
                 />
               )}
-              {downloadPill ? (
+              {downloadLoading ? (
                 <Button
-                  label={downloadPill.kind === "downloaded" ? "✓ Downloaded" : downloadPill.label}
+                  label="Cache"
+                  variant="ghost"
+                  loading
+                  disabled
+                  showFocusRing={tv}
+                  onPress={onDownloadPillPress}
+                />
+              ) : downloadPill ? (
+                <Button
+                  label={downloadPill.kind === "downloaded" ? "✓ Cached" : downloadPill.label}
                   variant="ghost"
                   progress={downloadPill.kind === "downloading" ? downloadPill.progress : undefined}
+                  busy={downloadBusy}
                   showFocusRing={tv}
                   onPress={onDownloadPillPress}
                 />
               ) : null}
-              {acquisitionId &&
-              (acquisition.data?.item.state === "completed" || acquisition.data?.item.state === "playable") ? (
-                <Button
-                  label="Add to library"
-                  variant="ghost"
-                  showFocusRing={tv}
-                  onPress={() => promoteAcquisition(acquisitionId).then(() => qc.invalidateQueries())}
-                />
-              ) : null}
-              {acquisitionId &&
+              {!demo && acquisitionId &&
               (acquisition.data?.item.state === "downloading" || acquisition.data?.item.state === "queued") ? (
                 <Button
-                  label="Cancel download"
+                  label="Stop caching"
                   variant="ghost"
                   showFocusRing={tv}
                   onPress={() => cancelAcquisition(acquisitionId)}
@@ -1603,19 +1730,19 @@ export function DetailsScreen({
               ) : null}
             </View>
             {seasonPicker}
-            {resumeEpisode ? (
+            {episodeTarget ? (
               <Text style={styles.resumeEp}>
                 <Text style={styles.resumeEpCode}>
-                  {`S${resumeEpisode.seasonNumber}:E${resumeEpisode.episodeNumber}`}
+                  {`S${episodeTarget.seasonNumber}:E${episodeTarget.episodeNumber}`}
                 </Text>
-                {resumeEpisode.title ? (
-                  <Text style={styles.resumeEpTitle}>{` "${resumeEpisode.title}"`}</Text>
+                {episodeTarget.title ? (
+                  <Text style={styles.resumeEpTitle}>{` "${episodeTarget.title}"`}</Text>
                 ) : null}
               </Text>
             ) : null}
-            {(resumeEpisode?.overview || media.metadata.overview) ? (
+            {(episodeTarget?.overview || media.metadata.overview) ? (
               <Text style={styles.overview}>
-                {resumeEpisode?.overview || media.metadata.overview}
+                {episodeTarget?.overview || media.metadata.overview}
               </Text>
             ) : null}
             <MediaFacts
@@ -1634,6 +1761,7 @@ export function DetailsScreen({
             />
           </>
         ) : null}
+        </View>
       </ScrollView>
     </View>
   );
@@ -1861,6 +1989,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     marginBottom: 2,
   },
+  epRowSelected: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    borderRadius: 4,
+  },
   epPlayArea: {
     flex: 1,
     flexDirection: "row",
@@ -1918,6 +2052,17 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#222",
   },
+  epProgress: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    pointerEvents: "none",
+  },
+  epProgressFill: { height: 3, backgroundColor: colors.accent, overflow: "hidden" },
+  epWatched: { marginLeft: 8 },
   epStill: { width: 140, height: 78, borderRadius: 4, backgroundColor: "#222" },
   epStillOverlay: {
     ...StyleSheet.absoluteFill,

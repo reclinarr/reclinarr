@@ -1,13 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { MediaIdentitySchema } from "@reclinarr/shared";
+import { invalidateSeerrTitle } from "../cache.js";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { requireFullAccess } from "../plugins/auth.js";
 import { resolveMediaByTmdb } from "../services/media-enrichment.js";
 
 export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/requests", async (req) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const query = z
       .object({
         take: z.coerce.number().int().positive().max(100).optional(),
@@ -30,7 +31,7 @@ export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContex
   });
 
   app.post("/api/request", async (req) => {
-    const { userContext } = await requireAuth(req);
+    const { userContext } = await requireFullAccess(ctx, req);
     const body = z
       .object({
         identity: MediaIdentitySchema,
@@ -55,6 +56,7 @@ export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContex
       seasons: body.seasons,
       is4k: body.is4k,
     });
+    invalidateSeerrTitle(ctx.cache, identity.tmdbId);
 
     const resolved = await resolveMediaByTmdb(
       ctx,

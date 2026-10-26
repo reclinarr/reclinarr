@@ -7,6 +7,12 @@ export const JellyfinUserSchema = z
   })
   .passthrough();
 
+export const JellyfinUserPolicySchema = z
+  .object({
+    Policy: z.object({ IsAdministrator: z.boolean().optional() }).passthrough().optional(),
+  })
+  .passthrough();
+
 export const JellyfinAuthResultSchema = z
   .object({
     User: JellyfinUserSchema,

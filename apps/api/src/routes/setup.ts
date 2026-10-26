@@ -18,6 +18,7 @@ const SetupSchema = z.object({
   DISPATCHARR_PASSWORD: z.string().optional(),
   BAZARR_URL: optionalUrl,
   BAZARR_API_KEY: z.string().optional(),
+  RECLINARR_TELEMETRY_DISABLED: z.enum(["true", "false"]).optional(),
 });
 
 const TestSchema = z.discriminatedUnion("service", [
@@ -55,7 +56,11 @@ function codesMatch(supplied: string, expected: string): boolean {
   return given.length === actual.length && timingSafeEqual(given, actual);
 }
 
-export async function registerSetupRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
+export async function registerSetupRoutes(
+  app: FastifyInstance,
+  ctx: AppContext,
+  onSaved: () => void,
+): Promise<void> {
   const setupRequired = !ctx.config.JELLYFIN_URL.trim() && !ctx.config.RECLINARR_USE_MOCKS;
   const setupCode = ensureSetupToken(ctx.config.RECLINARR_DATA_DIR);
   if (setupRequired) app.log.warn({ setupCode }, "first-run setup code");
@@ -86,6 +91,8 @@ export async function registerSetupRoutes(app: FastifyInstance, ctx: AppContext)
     }
     const existing = readSetupConfig(ctx.config.RECLINARR_DATA_DIR);
     writeSetupConfig(ctx.config.RECLINARR_DATA_DIR, { ...existing, ...values });
-    return reply.send({ saved: true, restartRequired: true });
+    // Reload only once the reply is flushed: it closes this server.
+    reply.raw.once("finish", onSaved);
+    return reply.send({ saved: true });
   });
 }

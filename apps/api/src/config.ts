@@ -4,11 +4,19 @@ import { parsePreferredLanguages } from "@reclinarr/shared";
 
 const EnvSchema = z.object({
   RECLINARR_PORT: z.coerce.number().default(8787),
-  RECLINARR_SESSION_SECRET: z.string().min(16).default("dev-only-change-me-please"),
   RECLINARR_DATA_DIR: z.string().default("./data"),
-  RECLINARR_PUBLIC_URL: z.string().default("http://localhost:8787"),
-  RECLINARR_POSTHOG_PROJECT_KEY: z.string().default(""),
+  RECLINARR_PUBLIC_URL: z.string().url().default("http://localhost:8787"),
+  /**
+   * Reverse proxies in front of Reclinarr (comma-separated IPs/CIDRs) whose X-Forwarded-For
+   * is trusted for client IPs. Loopback (the bundled nginx) is always trusted.
+   */
+  RECLINARR_TRUSTED_PROXIES: z.string().default(""),
   RECLINARR_TELEMETRY_DISABLED: z.string().optional().transform((v) => v === "1" || v === "true"),
+  /**
+   * Jellyfin usernames (comma-separated, case-insensitive) that only see and play the
+   * Jellyfin library: no Seerr discovery, requests, or IPTV downloads. For store review accounts.
+   */
+  RECLINARR_DEMO_USERS: z.string().default(""),
   /**
    * `nginx` — API returns X-Accel-Redirect; nginx sends media bytes.
    * `node` — API pipes upstream / local files (local Vite/dev default).
@@ -73,14 +81,19 @@ export type AppConfig = Omit<z.infer<typeof EnvSchema>, "RECLINARR_PREFERRED_LAN
   dispatcharrCloudflareAccess?: { clientId: string; clientSecret: string };
 };
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = EnvSchema.parse(env);
-  const isProd = parsed.NODE_ENV === "production";
-  if (isProd && parsed.RECLINARR_SESSION_SECRET === "dev-only-change-me-please") {
-    throw new Error(
-      "RECLINARR_SESSION_SECRET must be set to a strong random value in production",
-    );
+/**
+ * Environment variables win over values saved by the setup wizard (`stored`), except an
+ * empty `KEY=` (e.g. copied from .env.example), which counts as unset.
+ */
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  stored: Record<string, string> = {},
+): AppConfig {
+  const merged: NodeJS.ProcessEnv = { ...stored };
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && value !== "") merged[key] = value;
   }
+  const parsed = EnvSchema.parse(merged);
   let dispatcharrAuth: DispatcharrAuth | undefined;
   if (parsed.DISPATCHARR_API_KEY) {
     dispatcharrAuth = { type: "apiKey", apiKey: parsed.DISPATCHARR_API_KEY };
@@ -109,9 +122,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 /** Prefer Secure cookies when the public URL is https or NODE_ENV is production. */
 export function sessionCookieSecure(config: AppConfig): boolean {
   if (config.NODE_ENV === "production") return true;
-  try {
-    return new URL(config.RECLINARR_PUBLIC_URL).protocol === "https:";
-  } catch {
-    return false;
-  }
+  return new URL(config.RECLINARR_PUBLIC_URL).protocol === "https:";
 }

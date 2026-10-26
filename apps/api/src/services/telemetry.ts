@@ -6,15 +6,18 @@ type CapturedEvent = {
   properties: MetricProperties & { distinct_id: string; $process_person_profile: false };
   queuedAt: number;
 };
-type CaptureContext = { distinctId: string; platform?: string; appVersion?: string };
+type CaptureContext = {
+  distinctId: string;
+  platform?: string;
+  appVersion?: string;
+  sessionId?: string;
+  deviceType?: string;
+};
+type CaptureMetadata = Omit<CaptureContext, "distinctId">;
 
 const EVENT_NAMES = new Set([
   "server.api_operation",
   "server.provider_operation",
-  "client.api_operation",
-  "client.screen_view",
-  "client.playback_milestone",
-  "client.artwork_result",
 ]);
 const MAX_QUEUE = 500;
 
@@ -25,34 +28,23 @@ export class TelemetryService {
   private flushing = false;
   readonly enabled: boolean;
 
-  constructor(private readonly projectKey: string, disabled: boolean) {
+  constructor(
+    private readonly projectKey: string,
+    disabled: boolean,
+    private readonly environment: "development" | "production",
+  ) {
     this.enabled = Boolean(projectKey) && !disabled;
   }
 
   runWithDistinctId<T>(
     distinctId: string | null,
     callback: () => T,
-    metadata: { platform?: string; appVersion?: string } = {},
+    metadata: CaptureMetadata = {},
   ): T {
     if (!this.enabled || !distinctId || !/^[A-Za-z0-9_-]{16,80}$/.test(distinctId)) {
       return callback();
     }
     return this.currentContext.run({ distinctId, ...metadata }, callback);
-  }
-
-  captureClientBatch(
-    distinctId: string,
-    events: Array<{ event: string; properties: Record<string, unknown> }>,
-    platform: string,
-  ) {
-    if (!this.enabled || !/^[A-Za-z0-9_-]{16,80}$/.test(distinctId)) return;
-    for (const event of events.slice(0, 50)) {
-      if (!EVENT_NAMES.has(event.event) || !isSafeProperties(event.event, event.properties)) continue;
-      this.enqueue(event.event, distinctId, {
-        ...event.properties as MetricProperties,
-        platform,
-      });
-    }
   }
 
   captureCurrent(event: string, properties: MetricProperties) {
@@ -62,6 +54,9 @@ export class TelemetryService {
       ...properties,
       ...(context.platform ? { platform: context.platform } : {}),
       ...(context.appVersion ? { app_version: context.appVersion } : {}),
+      ...(context.sessionId ? { $session_id: context.sessionId } : {}),
+      ...(context.deviceType ? { $device_type: context.deviceType } : {}),
+      environment: this.environment,
     };
     if (!isSafeProperties(event, enriched)) return;
     this.enqueue(event, context.distinctId, enriched);
@@ -104,8 +99,9 @@ export class TelemetryService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           token: this.projectKey,
-          batch: events.map(({ queuedAt: _queuedAt, ...event }) => ({
+          batch: events.map(({ queuedAt, ...event }) => ({
             ...event,
+            timestamp: new Date(queuedAt).toISOString(),
             properties: { ...event.properties, $geoip_disable: true },
           })),
         }),
@@ -129,13 +125,10 @@ export class TelemetryService {
 
 function isSafeProperties(event: string, properties: Record<string, unknown>): boolean {
   const common = new Set(["platform"]);
+  const context = ["platform", "app_version", "$session_id", "$device_type", "environment"];
   const allowed: Record<string, Set<string>> = {
-    "server.api_operation": new Set(["operation", "method", "duration_ms", "status", "outcome", "platform", "app_version"]),
-    "server.provider_operation": new Set(["provider", "duration_ms", "status", "outcome", "platform", "app_version"]),
-    "client.api_operation": new Set(["operation", "duration_ms", "outcome", "platform", "app_version"]),
-    "client.screen_view": new Set(["screen", "platform", "app_version"]),
-    "client.playback_milestone": new Set(["milestone", "duration_ms", "media_kind", "platform", "app_version"]),
-    "client.artwork_result": new Set(["duration_ms", "outcome", "platform", "app_version"]),
+    "server.api_operation": new Set(["operation", "method", "duration_ms", "status", "outcome", ...context]),
+    "server.provider_operation": new Set(["provider", "duration_ms", "status", "outcome", ...context]),
   };
   const keys = allowed[event];
   if (!keys || Object.keys(properties).some((key) => !keys.has(key))) return false;
@@ -154,10 +147,12 @@ function isSafeProperties(event: string, properties: Record<string, unknown>): b
       if (typeof value !== "string" || !/^[a-z_]{2,32}$/.test(value)) return false;
     } else if (key === "method") {
       if (value !== "GET" && value !== "POST" && value !== "PUT" && value !== "DELETE" && value !== "PATCH") return false;
-    } else if (key === "screen" || key === "milestone") {
-      if (typeof value !== "string" || !/^[a-z_]{2,32}$/.test(value)) return false;
-    } else if (key === "media_kind") {
-      if (value !== "vod" && value !== "live") return false;
+    } else if (key === "$session_id") {
+      if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)) return false;
+    } else if (key === "environment") {
+      if (value !== "development" && value !== "production") return false;
+    } else if (key === "$device_type") {
+      if (value !== "TV" && value !== "Tablet" && value !== "Mobile" && value !== "Desktop") return false;
     }
   }
   return true;

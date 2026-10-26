@@ -6,6 +6,8 @@ export {
   getClient,
   tryGetClient,
   trackTelemetry,
+  trackFeature,
+  TELEMETRY_FEATURES,
   login,
   logout,
   me,
@@ -20,6 +22,10 @@ export {
   myList,
   myListHas,
   toggleMyList,
+  syncPreferences,
+  adminServices,
+  testAdminService,
+  saveAdminService,
   discoverTrending,
   discoverMovies,
   discoverTv,
@@ -47,7 +53,7 @@ export {
   playLiveChannel,
   stopLivePlayback,
 } from "./api.js";
-export type { ReclinarrClientOptions, LoginResult } from "./api.js";
+export type { ReclinarrClientOptions, LoginResult, TelemetryFeature } from "./api.js";
 export {
   mediaHref,
   canPlayMedia,
@@ -78,7 +84,7 @@ export {
   loadSubtitlePrefSync,
   saveSubtitlePref,
   saveSubtitleOff,
-  saveSubtitleTrack,
+  subtitlePrefForTrack,
   resolveSubtitleIndex,
 } from "./subtitle-pref.js";
 export type { SubtitlePref } from "./subtitle-pref.js";
@@ -87,6 +93,15 @@ export {
   loadAudioLanguagePrefSync,
   saveAudioLanguagePref,
 } from "./audio-pref.js";
+export type {
+  AdminServicesResponse,
+  ServiceEdit,
+  ServiceFieldView,
+  ServiceId,
+  ServiceTestResult,
+  ServiceView,
+} from "./admin.js";
+export type { UserPreferences, PreferencesResponse } from "./preferences.js";
 export { getOrCreateDeviceId } from "./device.js";
 export {
   memoryStorage,

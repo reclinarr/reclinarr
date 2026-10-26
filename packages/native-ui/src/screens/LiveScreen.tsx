@@ -21,6 +21,7 @@ import {
   liveNow,
   playLiveChannel,
   toggleLiveFavourite,
+  trackFeature,
 } from "@reclinarr/client";
 import { Artwork } from "../Artwork.js";
 import { Button } from "../Button.js";
@@ -113,6 +114,7 @@ export function LiveScreen({
   const playMutation = useMutation({
     mutationFn: (uuid: string) => playLiveChannel(uuid, { hls: preferHls }),
     onSuccess: (data, uuid) => {
+      trackFeature("live_tune");
       const list = (channels.data?.items ?? []).map((c) => ({
         uuid: c.uuid,
         name: c.name,
@@ -532,7 +534,7 @@ function PlayChannelButton({
         showFocusRing && isTvFocused(state) && styles.playBtnFocused,
       ]}
     >
-      <PlayIcon color={colors.bg} size={compact ? 14 : 16} />
+      <PlayIcon color={colors.text} size={compact ? 14 : 16} />
       <Text style={styles.playBtnLabel}>Play</Text>
     </Pressable>
   );
@@ -902,7 +904,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.08 }],
   },
   playBtnLabel: {
-    color: colors.bg,
+    color: colors.text,
     fontSize: 14,
     fontWeight: "700",
   },

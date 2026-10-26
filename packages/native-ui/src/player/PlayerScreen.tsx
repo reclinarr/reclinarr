@@ -17,7 +17,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import type { KeyValueStorage } from "@reclinarr/client";
+import type { KeyValueStorage, SubtitlePref } from "@reclinarr/client";
 import {
   getClient,
   getAcquisition,
@@ -33,12 +33,12 @@ import {
   reportProgress,
   resolvePlaybackForPlay,
   resolveSubtitleIndex,
-  saveSubtitleOff,
-  saveSubtitleTrack,
+  subtitlePrefForTrack,
   seekCapForSource,
   seriesEpisodes,
   SESSION_HEADER,
   textSubtitles,
+  trackFeature,
   trackTelemetry,
 } from "@reclinarr/client";
 import {
@@ -237,6 +237,10 @@ export function PlayerScreen({
   /** Ignore spurious native onEnd before real playback (common on iOS HLS load failures). */
   const playbackEverProgressed = useRef(false);
   const playbackStartAt = useRef(0);
+  const watchedMs = useRef(0);
+  const lastProgressAt = useRef<number | null>(null);
+  const stalled = useRef(false);
+  const stallCount = useRef(0);
   const mediaLoaded = useRef(false);
   const resumeApplied = useRef(false);
   const positionRef = useRef(0);
@@ -251,6 +255,11 @@ export function PlayerScreen({
   const liveRecovering = useRef(false);
   const liveRecoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const client = getClient();
+  const saveSubtitles = (subtitles: SubtitlePref) => {
+    client
+      .updatePreferences({ subtitles })
+      .catch((err) => console.error("[preferences] save failed", err));
+  };
   const isLive = Boolean(params.live);
   const identity = params.identity;
   const seriesTmdbId =
@@ -404,6 +413,26 @@ export function PlayerScreen({
     setError(null);
     setIsBuffering(true);
     setBufferPercent(downloadProgressPercent(params.source));
+  }, [params.source]);
+
+  useEffect(() => {
+    const mediaKind = params.live ? "live" : "vod";
+    watchedMs.current = 0;
+    lastProgressAt.current = null;
+    stalled.current = false;
+    stallCount.current = 0;
+    // Runs before the reset effect above re-runs, so refs still describe the ending source.
+    return () => {
+      if (!playbackEverProgressed.current) return;
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      trackTelemetry("client.playback_milestone", {
+        milestone: "playback_end",
+        duration_ms: Math.round(now - playbackStartAt.current),
+        media_kind: mediaKind,
+        watched_s: Math.round(watchedMs.current / 10_000) * 10,
+        stall_count: stallCount.current,
+      });
+    };
   }, [params.source]);
 
   const applyResumeSeek = useCallback(
@@ -812,6 +841,7 @@ export function PlayerScreen({
       const next = list[(idx + dir + list.length) % list.length];
       if (!next) return;
       const data = await playLiveChannel(next.uuid, { hls: preferLiveHls });
+      trackFeature("live_zap");
       onReplaceParams({
         source: data.source,
         title: data.title ?? next.name,
@@ -936,6 +966,10 @@ export function PlayerScreen({
   );
 
   const playNextEpisode = useCallback(() => playAdjacentEpisode(1), [playAdjacentEpisode]);
+  const playNextEpisodeByUser = useCallback(() => {
+    trackFeature("next_episode");
+    return playNextEpisode();
+  }, [playNextEpisode]);
   const playPreviousEpisode = useCallback(() => playAdjacentEpisode(-1), [playAdjacentEpisode]);
 
   const openEpisodesMenu = useCallback(() => {
@@ -970,7 +1004,10 @@ export function PlayerScreen({
     if (autoplayCountdown == null || paused || error || episodeBusy) return;
     const timer = setTimeout(() => {
       if (autoplayCountdown > 1) setAutoplayCountdown(autoplayCountdown - 1);
-      else void playNextEpisode();
+      else {
+        trackFeature("autoplay_next");
+        void playNextEpisode();
+      }
     }, 1000);
     return () => clearTimeout(timer);
   }, [autoplayCountdown, paused, error, episodeBusy, playNextEpisode]);
@@ -1105,6 +1142,13 @@ export function PlayerScreen({
               setIsBuffering(false);
               reveal();
             }
+            // Wall clock, not currentTime: live MPEG-TS can report 0 for the whole session.
+            const tick = typeof performance !== "undefined" ? performance.now() : Date.now();
+            if (lastProgressAt.current != null && !pausedRef.current && !stalled.current) {
+              const delta = tick - lastProgressAt.current;
+              if (delta > 0 && delta <= 5_000) watchedMs.current += delta;
+            }
+            lastProgressAt.current = tick;
             setPosition(currentTime);
             onPositionSeconds?.(currentTime);
             if (typeof d === "number" && Number.isFinite(d) && d > 0) {
@@ -1163,6 +1207,8 @@ export function PlayerScreen({
                 setIsBuffering(true);
               }
             } else {
+              if (waiting && !stalled.current) stallCount.current += 1;
+              stalled.current = waiting;
               setIsBuffering(waiting);
             }
             if (
@@ -1209,7 +1255,7 @@ export function PlayerScreen({
                 source.provider === "cache" && !source.downloadComplete;
               setError(
                 partialCache
-                  ? "Reached the end of downloaded video. Wait for more cache or play again later."
+                  ? "Reached the end of the cached video. Wait for more to cache or play again later."
                   : "Playback stopped unexpectedly. Return to the title and try again.",
               );
               setIsBuffering(false);
@@ -1270,7 +1316,7 @@ export function PlayerScreen({
       {autoplayCountdown != null ? (
         <View style={styles.autoplayPanel}>
           <Text style={styles.autoplayText}>Next episode in {autoplayCountdown} seconds</Text>
-          <Button label="Play next episode" onPress={() => void playNextEpisode()} showFocusRing hasTVPreferredFocus />
+          <Button label="Play next episode" onPress={() => void playNextEpisodeByUser()} showFocusRing hasTVPreferredFocus />
           <Button label="Back to browsing" variant="ghost" onPress={handleClose} showFocusRing />
         </View>
       ) : null}
@@ -1413,7 +1459,7 @@ export function PlayerScreen({
                       <NfPreviousEpisodeIcon size={28} />
                     </IconButton>
                     <IconButton
-                      onPress={() => void playNextEpisode()}
+                      onPress={() => void playNextEpisodeByUser()}
                       label={
                         episodeBusy
                           ? "Loading next episode"
@@ -1485,7 +1531,8 @@ export function PlayerScreen({
                 <Pressable
                   onPress={() => {
                     setSubIndex(null);
-                    void saveSubtitleOff(storage);
+                    saveSubtitles({ mode: "off" });
+                    trackFeature("subtitle_change");
                     setMenu("none");
                   }}
                 >
@@ -1496,7 +1543,8 @@ export function PlayerScreen({
                     key={`${t.language}-${i}`}
                     onPress={() => {
                       setSubIndex(i);
-                      void saveSubtitleTrack(t, storage);
+                      saveSubtitles(subtitlePrefForTrack(t));
+                      trackFeature("subtitle_change");
                       setMenu("none");
                     }}
                   >

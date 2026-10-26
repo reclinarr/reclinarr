@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 type StepId = "code" | "jellyfin" | "seerr" | "dispatcharr" | "bazarr" | "review";
@@ -47,6 +47,8 @@ const OPTIONAL_FIELDS: Record<OptionalId, (keyof Values)[]> = {
 
 type Notice = { tone: "ok" | "bad"; text: string };
 
+const RELOAD_TIMEOUT_MS = 30_000;
+
 export function SetupWizard() {
   const [stepIndex, setStepIndex] = useState(0);
   const [values, setValues] = useState<Values>(EMPTY);
@@ -58,7 +60,35 @@ export function SetupWizard() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [shareMetrics, setShareMetrics] = useState(true);
   const step = STEPS[stepIndex] ?? STEPS[0];
+
+  // The server reloads itself after saving; reopen the app once it reports setup complete.
+  useEffect(() => {
+    if (!saved) return;
+    let cancelled = false;
+    void (async () => {
+      const deadline = Date.now() + RELOAD_TIMEOUT_MS;
+      while (!cancelled && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        try {
+          const status = (await fetch("/api/setup/status").then((r) => r.json())) as { setupRequired?: boolean };
+          if (status.setupRequired === false) {
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // Unreachable while the server is between shutdown and restart.
+        }
+      }
+      if (!cancelled) {
+        setNotice({ tone: "bad", text: "The server did not come back. Check the API log, then refresh this page." });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [saved]);
 
   const setField = (key: keyof Values, value: string) => {
     setValues((current) => ({ ...current, [key]: value }));
@@ -160,7 +190,7 @@ export function SetupWizard() {
     setBusy(true);
     setNotice(null);
     try {
-      const { response, result } = await postJson("/api/setup", saveBody(values, skipped));
+      const { response, result } = await postJson("/api/setup", saveBody(values, skipped, shareMetrics));
       if (!response.ok) {
         setNotice({ tone: "bad", text: result.error ?? "Could not save setup." });
         return;
@@ -185,7 +215,8 @@ export function SetupWizard() {
         {saved ? (
           <>
             <Text style={styles.title}>Settings saved</Text>
-            <Text style={styles.body}>Restart the Reclinarr server, then refresh this page. Your services connect on the next start.</Text>
+            <Text style={styles.body}>Connecting to your services…</Text>
+            {notice ? <Text style={notice.tone === "ok" ? styles.ok : styles.bad}>{notice.text}</Text> : null}
           </>
         ) : (
           <>
@@ -195,7 +226,14 @@ export function SetupWizard() {
               {step.id === "jellyfin" ? <Text style={styles.badge}>Required</Text> : null}
             </View>
             <Text style={styles.body}>{bodyFor(step.id)}</Text>
-            <StepFields step={step.id} values={values} skipped={skipped} onChange={setField} />
+            <StepFields
+              step={step.id}
+              values={values}
+              skipped={skipped}
+              onChange={setField}
+              shareMetrics={shareMetrics}
+              onShareMetricsChange={setShareMetrics}
+            />
             {notice ? <Text style={notice.tone === "ok" ? styles.ok : styles.bad}>{notice.text}</Text> : null}
             <View style={styles.actions}>
               {stepIndex > 0 ? (
@@ -231,11 +269,15 @@ function StepFields({
   values,
   skipped,
   onChange,
+  shareMetrics,
+  onShareMetricsChange,
 }: {
   step: StepId;
   values: Values;
   skipped: Record<OptionalId, boolean>;
   onChange: (key: keyof Values, value: string) => void;
+  shareMetrics: boolean;
+  onShareMetricsChange: (value: boolean) => void;
 }) {
   if (step === "code") {
     return <Field label="Setup code" placeholder="From the API log" value={values.setupCode} onChangeText={(value) => onChange("setupCode", value)} />;
@@ -276,6 +318,24 @@ function StepFields({
       <ReviewRow label="Seerr" value={skipped.seerr ? "Skipped" : values.SEERR_URL.trim()} />
       <ReviewRow label="Dispatcharr" value={skipped.dispatcharr ? "Skipped" : values.DISPATCHARR_URL.trim()} />
       <ReviewRow label="Bazarr" value={skipped.bazarr ? "Skipped" : values.BAZARR_URL.trim()} />
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: shareMetrics }}
+        onPress={() => onShareMetricsChange(!shareMetrics)}
+        style={styles.consent}
+      >
+        <View style={[styles.checkbox, shareMetrics && styles.checkboxOn]}>
+          {shareMetrics ? <Text style={styles.checkmark}>✓</Text> : null}
+        </View>
+        <View style={styles.consentText}>
+          <Text style={styles.consentTitle}>Share anonymous usage metrics</Text>
+          <Text style={styles.hint}>
+            Helps improve Reclinarr. Sends feature usage, timings, app version, and platform to
+            PostHog's EU service; never titles, searches, or account details. Each person can still
+            decline on their own device.
+          </Text>
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -343,7 +403,7 @@ function bodyFor(step: StepId): string {
     case "bazarr":
       return "Bazarr serves subtitles. Test it, or skip and add it later.";
     case "review":
-      return "These settings are stored in a private file on this server. Restart Reclinarr after saving.";
+      return "These settings are stored in a private file on this server.";
   }
 }
 
@@ -414,7 +474,7 @@ function testBody(step: StepId, values: Values): Record<string, string> {
   }
 }
 
-function saveBody(values: Values, skipped: Record<OptionalId, boolean>): Record<string, string> {
+function saveBody(values: Values, skipped: Record<OptionalId, boolean>, shareMetrics: boolean): Record<string, string> {
   return {
     setupCode: values.setupCode.trim(),
     JELLYFIN_URL: values.JELLYFIN_URL.trim(),
@@ -426,6 +486,7 @@ function saveBody(values: Values, skipped: Record<OptionalId, boolean>): Record<
     DISPATCHARR_PASSWORD: skipped.dispatcharr ? "" : values.DISPATCHARR_PASSWORD,
     BAZARR_URL: skipped.bazarr ? "" : values.BAZARR_URL.trim(),
     BAZARR_API_KEY: skipped.bazarr ? "" : values.BAZARR_API_KEY.trim(),
+    RECLINARR_TELEMETRY_DISABLED: shareMetrics ? "false" : "true",
   };
 }
 
@@ -478,4 +539,10 @@ const styles = StyleSheet.create({
   reviewRow: { gap: 2 },
   reviewLabel: { color: "#888", fontSize: 12, fontWeight: "700" },
   reviewValue: { color: "white", fontSize: 15 },
+  consent: { flexDirection: "row", gap: 12, alignItems: "flex-start", marginTop: 8 },
+  checkbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: "#555", alignItems: "center", justifyContent: "center", marginTop: 1 },
+  checkboxOn: { backgroundColor: "#d72130", borderColor: "#d72130" },
+  checkmark: { color: "white", fontSize: 14, fontWeight: "700" },
+  consentText: { flex: 1, gap: 4 },
+  consentTitle: { color: "white", fontSize: 15, fontWeight: "600" },
 });

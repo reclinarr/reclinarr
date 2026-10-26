@@ -252,7 +252,7 @@ export function RequestListSkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 export function DownloadListSkeleton({ rows = 5 }: { rows?: number }) {
-  return <View accessibilityLabel="Loading downloads" style={{ gap: 8 }}>
+  return <View accessibilityLabel="Loading cache" style={{ gap: 8 }}>
     {Array.from({ length: rows }, (_, i) => <View key={i} style={{ minHeight: 90, flexDirection: "row", gap: 12, paddingVertical: 12, paddingHorizontal: 8, alignItems: "center" }}>
       <SkeletonBlock width={96} height={54} />
       <View style={{ flex: 1, gap: 8 }}><SkeletonBlock width="64%" height={16} /><SkeletonBlock width="45%" height={12} /><SkeletonBlock width="100%" height={3} /></View>

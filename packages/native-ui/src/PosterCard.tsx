@@ -22,6 +22,7 @@ import { Artwork } from "./Artwork.js";
 import { isTvFocused, useTvFocusAllowed } from "./focus.js";
 import { ChevronDownIcon, DownloadIcon, PlayIcon } from "./icons.js";
 import type { NativeLayout } from "./layout.js";
+import { AccentFill } from "./AccentFill.js";
 import { colors } from "./theme.js";
 import { textShadowStyle } from "./webStyle.js";
 
@@ -271,7 +272,7 @@ export function PosterCard({
         ) : null}
         {progress != null ? (
           <View style={styles.progress}>
-            <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+            <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]}><AccentFill /></View>
           </View>
         ) : null}
       </>
@@ -619,7 +620,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.25)",
     pointerEvents: "none",
   },
-  progressFill: { height: 3, backgroundColor: colors.accent },
+  progressFill: { height: 3, backgroundColor: colors.accent, overflow: "hidden" },
   panel: {
     backgroundColor: "#181818",
     paddingHorizontal: 12,

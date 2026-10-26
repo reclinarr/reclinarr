@@ -1,0 +1,49 @@
+# App store review demo for Coolify: Reclinarr + Jellyfin only (no Seerr, no IPTV).
+# Coolify's proxy serves HTTPS: set the reclinarr service's domain to https://<demo domain>:8787
+# and RECLINARR_PUBLIC_URL to https://<demo domain> in the Coolify UI.
+#
+# /srv/reclinarr-demo/media on the host holds public-domain / openly licensed files,
+# e.g. movies/Nosferatu (1922).mkv
+#
+# Jellyfin is only reachable from the host. Set it up once through an SSH tunnel
+# (ssh -L 8096:localhost:8096 <host>, then http://localhost:8096): create an admin, add a
+# library at /media/movies, then create the reviewer user (default name apple_demo) with
+# access to that library only.
+
+services:
+  reclinarr:
+    build:
+      context: https://github.com/reclinarr/reclinarr.git#main
+      dockerfile: Dockerfile
+    # Never pull: the image only exists once built from the repository above.
+    pull_policy: build
+    # Reaps orphaned processes (ffmpeg) and forwards signals to the entrypoint.
+    init: true
+    environment:
+      RECLINARR_PORT: "8787"
+      RECLINARR_DATA_DIR: /data
+      RECLINARR_PUBLIC_URL: ${RECLINARR_PUBLIC_URL}
+      # Only Coolify's proxy reaches this container; trust it so login rate limits see client IPs.
+      RECLINARR_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      JELLYFIN_URL: http://jellyfin:8096
+      RECLINARR_DEMO_USERS: ${RECLINARR_DEMO_USERS:-apple_demo}
+    volumes:
+      - reclinarr-data:/data
+    depends_on:
+      - jellyfin
+    restart: unless-stopped
+
+  jellyfin:
+    image: jellyfin/jellyfin:10.10.7
+    ports:
+      - "127.0.0.1:8096:8096"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - /srv/reclinarr-demo/media:/media:ro
+    restart: unless-stopped
+
+volumes:
+  reclinarr-data:
+  jellyfin-config:
+  jellyfin-cache:

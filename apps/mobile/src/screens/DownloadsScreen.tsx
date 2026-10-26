@@ -5,6 +5,6 @@ import { useScreenNav } from "../useScreenNav";
 export function DownloadsScreen({ username }: { username: string }) {
   const nav = useScreenNav();
   return (
-    <SharedDownloads nav={nav} header={<ScreenHeader username={username} title="Downloads" showBack />} />
+    <SharedDownloads nav={nav} header={<ScreenHeader username={username} title="Cache" showBack />} />
   );
 }
