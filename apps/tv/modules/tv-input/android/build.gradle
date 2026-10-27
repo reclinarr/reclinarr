@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.reclinarr.tvinput'
+version = '0.1.0'
+
+// Same resolution as react-native-video so both players share one Media3 version.
+def media3Version = rootProject.ext.has('media3Version') ? rootProject.ext.get('media3Version') : '1.8.0'
+
+android {
+  namespace "app.reclinarr.tvinput"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  implementation "androidx.media3:media3-exoplayer:${media3Version}"
+  testImplementation 'junit:junit:4.13.2'
+}

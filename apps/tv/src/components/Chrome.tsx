@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pressable, StyleSheet, Text, TVFocusGuideView, View } from "react-native";
 import {
@@ -19,14 +19,17 @@ import {
   useIsDemoUser,
   webBg,
 } from "@reclinarr/native-ui";
-import type { Nav, RootStackParamList } from "../nav";
+import type { MainTabParamList, Nav, RootStackParamList } from "../nav";
 import { useTvLayout } from "../layout";
 import { clearSession } from "../session";
+
+/** True for screens rendered inside the Main tab navigator. */
+export const MainTabContext = createContext(false);
 
 /** Routes presented over Chrome (transparent modal / player) that must own D-pad focus. */
 const FOCUS_OVERLAY_ROUTES = new Set<keyof RootStackParamList>(["Details", "Player"]);
 
-const LINKS: Array<{ name: keyof RootStackParamList; label: string }> = [
+const LINKS: Array<{ name: keyof MainTabParamList; label: string }> = [
   { name: "Home", label: "Home" },
   { name: "Movies", label: "Movies" },
   { name: "Series", label: "Series" },
@@ -37,7 +40,7 @@ const LINKS: Array<{ name: keyof RootStackParamList; label: string }> = [
 const TAB_SKIM_DELAY_MS = 200;
 
 /** Route opened by skimming the nav; its Chrome keeps focus on the tab instead of the page. */
-let skimTarget: keyof RootStackParamList | null = null;
+let skimTarget: keyof MainTabParamList | null = null;
 
 export function Chrome({
   username,
@@ -65,6 +68,13 @@ export function Chrome({
     return Boolean(top && FOCUS_OVERLAY_ROUTES.has(top.name as keyof RootStackParamList));
   });
   const canFocus = isFocused && !overlayOpen;
+  const inTabs = useContext(MainTabContext);
+  const tabSelected = useNavigationState((state) => state?.routes[state.index]?.key === route.key);
+  // A deselected tab is detached natively by react-native-screens, so it cannot take
+  // D-pad focus and can stay mounted. The selected tab still tears down under Details.
+  const keepMounted = inTabs && !tabSelected;
+  // Kept-mounted content has spent its one-shot initial focus; land on the tab instead.
+  const [revisit, setRevisit] = useState(false);
   const canFocusRef = useRef(canFocus);
   canFocusRef.current = canFocus;
   const pendingNav = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,6 +92,10 @@ export function Chrome({
       pendingNav.current = null;
     }
   }, [canFocus]);
+  useEffect(() => {
+    if (keepMounted) setRevisit(true);
+    else if (!canFocus) setRevisit(false);
+  }, [keepMounted, canFocus]);
   useEffect(() => {
     return () => {
       if (pendingNav.current) clearTimeout(pendingNav.current);
@@ -119,7 +133,7 @@ export function Chrome({
     }
   }
 
-  function openTab(name: keyof RootStackParamList, fromFocus: boolean) {
+  function openTab(name: keyof MainTabParamList, fromFocus: boolean) {
     clearPendingNav();
     if (fromFocus && !canFocusRef.current) return;
     if (route.name === name) return;
@@ -127,12 +141,14 @@ export function Chrome({
     navigation.navigate(name as never);
   }
 
-  function onTabFocus(name: keyof RootStackParamList, active: boolean) {
+  function onTabFocus(name: keyof MainTabParamList, active: boolean) {
+    // Leaving a tab (Back, Details) can bounce native focus onto its own header after
+    // canFocus drops; counting that as landed would skip the claim on the next visit.
+    if (!canFocusRef.current) return;
     if (active) {
       setTabFocusLanded(true);
       return;
     }
-    if (!canFocusRef.current) return;
     clearPendingNav();
     pendingNav.current = setTimeout(() => {
       pendingNav.current = null;
@@ -180,7 +196,7 @@ export function Chrome({
                 onPress={() => openTab(link.name, false)}
                 focusable={canFocus}
                 hasTVPreferredFocus={
-                  canFocus && active && !tabFocusLanded && (retainTabFocus || !contentFocus)
+                  canFocus && active && !tabFocusLanded && (retainTabFocus || revisit || !contentFocus)
                 }
                 onFocus={() => onTabFocus(link.name, active)}
                 onBlur={clearPendingNav}
@@ -326,7 +342,7 @@ export function Chrome({
         importantForAccessibility={canFocus ? "auto" : "no-hide-descendants"}
       >
         <TvInitialFocusSuppressProvider suppress={retainTabFocus}>
-          {canFocus ? children : null}
+          {canFocus || keepMounted ? children : null}
         </TvInitialFocusSuppressProvider>
       </View>
       </TVFocusGuideView>

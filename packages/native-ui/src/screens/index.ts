@@ -6,7 +6,7 @@ export type {
   ScreenNav,
 } from "./types.js";
 export { HomeScreen } from "./HomeScreen.js";
-export { CatalogScreen } from "./CatalogScreen.js";
+export { CatalogScreen, catalogQuery } from "./CatalogScreen.js";
 export { SearchScreen } from "./SearchScreen.js";
 export { DownloadsScreen } from "./DownloadsScreen.js";
 export { RequestsScreen } from "./RequestsScreen.js";

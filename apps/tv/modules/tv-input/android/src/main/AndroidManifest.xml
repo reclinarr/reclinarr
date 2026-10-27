@@ -1,0 +1,32 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
+  <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+  <application>
+    <!-- Disabled until a sync finds Dispatcharr configured, so Jellyfin-only setups get no empty input. -->
+    <service
+      android:name="app.reclinarr.tvinput.ReclinarrTvInputService"
+      android:enabled="false"
+      android:exported="true"
+      android:label="Reclinarr"
+      android:permission="android.permission.BIND_TV_INPUT">
+      <intent-filter>
+        <action android:name="android.media.tv.TvInputService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.media.tv.input"
+        android:resource="@xml/reclinarr_tv_input" />
+    </service>
+
+    <activity
+      android:name="app.reclinarr.tvinput.SetupActivity"
+      android:exported="true"
+      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+    <service
+      android:name="app.reclinarr.tvinput.SyncJobService"
+      android:exported="false"
+      android:permission="android.permission.BIND_JOB_SERVICE" />
+  </application>
+</manifest>

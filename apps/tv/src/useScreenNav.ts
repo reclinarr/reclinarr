@@ -10,6 +10,6 @@ export function useScreenNav(): ScreenNav {
     goBack: () => navigation.goBack(),
     openServer: (opts) => navigation.navigate("Server", opts),
     resetToLogin: () => navigation.reset({ index: 0, routes: [{ name: "Login" }] }),
-    resetToMain: () => navigation.reset({ index: 0, routes: [{ name: "Home" }] }),
+    resetToMain: () => navigation.reset({ index: 0, routes: [{ name: "Main" }] }),
   };
 }

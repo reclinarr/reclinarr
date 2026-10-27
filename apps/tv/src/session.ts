@@ -7,7 +7,9 @@ import {
   loadServerUrl as load,
   probeServer,
   saveServerUrl as save,
+  SESSION_KEY,
 } from "@reclinarr/native-ui";
+import { TvInput } from "../modules/tv-input";
 
 export { SERVER_URL_KEY, SESSION_KEY, probeServer } from "@reclinarr/native-ui";
 
@@ -20,7 +22,16 @@ export async function saveServerUrl(url: string): Promise<string> {
 }
 
 export async function clearSession(): Promise<void> {
+  await TvInput.clearCredentials();
   return clear(AsyncStorage);
+}
+
+/** Hands the signed-in session to the system TV guide integration and refreshes its channels. */
+export async function syncTvInput(): Promise<void> {
+  const [url, sessionId] = await Promise.all([loadServerUrl(), AsyncStorage.getItem(SESSION_KEY)]);
+  if (!url || !sessionId) return;
+  TvInput.setCredentials(url, sessionId);
+  TvInput.requestSync();
 }
 
 export function attachClient(baseUrl: string): ReclinarrClient {

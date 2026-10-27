@@ -1,6 +1,7 @@
 node_modules/
 .expo/
-android/
+/android/
+modules/*/android/build/
 ios/
 dist/
 *.log

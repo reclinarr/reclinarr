@@ -9,6 +9,7 @@ import { Focusable } from "../components/Focusable";
 import { TvTextInput } from "../components/TvTextInput";
 import { colors } from "../theme";
 import type { Nav } from "../nav";
+import { syncTvInput } from "../session";
 
 export function LoginScreen() {
   const navigation = useNavigation<Nav>();
@@ -25,8 +26,9 @@ export function LoginScreen() {
         deviceName: "Reclinarr Google TV",
       }),
     onSuccess: async () => {
+      void syncTvInput().catch((err) => console.error("[tv-input] sync failed", err));
       await qc.invalidateQueries({ queryKey: ["me"] });
-      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+      navigation.reset({ index: 0, routes: [{ name: "Main" }] });
     },
   });
 

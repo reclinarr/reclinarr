@@ -20,6 +20,10 @@ import { measureAndScrollIntoView } from "../tvScroll.js";
 import { FOCUS_ROOM, webBg } from "../webStyle.js";
 import type { ScreenChromeProps } from "./types.js";
 
+export function catalogQuery(mediaType: "movie" | "tv") {
+  return { queryKey: ["catalog", mediaType], queryFn: () => catalogRails(mediaType) };
+}
+
 export function CatalogScreen({
   layout,
   nav,
@@ -31,10 +35,7 @@ export function CatalogScreen({
 }: ScreenChromeProps & {
   mediaType: "movie" | "tv";
 }) {
-  const catalog = useQuery({
-    queryKey: ["catalog", mediaType],
-    queryFn: () => catalogRails(mediaType),
-  });
+  const catalog = useQuery(catalogQuery(mediaType));
   const { playMedia, bufferStatus } = usePlayMedia(nav);
   const rows = catalog.data?.rows ?? [];
   const tv = focusMode === "tv";

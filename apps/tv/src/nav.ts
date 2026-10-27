@@ -1,3 +1,4 @@
+import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { DetailsParams } from "@reclinarr/native-ui";
 import type { MediaIdentity, PlaybackSource } from "@reclinarr/shared";
@@ -17,15 +18,19 @@ export type PlayParams = {
   liveChannels?: LiveChannelRef[];
 };
 
+export type MainTabParamList = {
+  Home: undefined;
+  Movies: undefined;
+  Series: undefined;
+  Live: undefined;
+};
+
 export type RootStackParamList = {
   Boot: undefined;
   Server: { change?: boolean } | undefined;
   Login: undefined;
-  Home: undefined;
-  Movies: undefined;
-  Series: undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   Search: undefined;
-  Live: undefined;
   Downloads: undefined;
   Requests: undefined;
   Settings: undefined;

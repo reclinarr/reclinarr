@@ -1,12 +1,16 @@
 import { type JSX, useEffect } from "react";
 import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { me, syncPreferences } from "@reclinarr/client";
 import { StatusBar } from "expo-status-bar";
-import type { Nav, RootStackParamList } from "./src/nav";
-import { attachClient, loadServerUrl } from "./src/session";
+import { AppState } from "react-native";
+import type { MainTabParamList, Nav, RootStackParamList } from "./src/nav";
+import { attachClient, loadServerUrl, syncTvInput } from "./src/session";
+import { TvInput } from "./modules/tv-input";
 import { AnalyticsConsentGate, webBg } from "@reclinarr/native-ui";
+import { MainTabContext } from "./src/components/Chrome";
 import { BootSkeleton } from "./src/components/Skeleton";
 import { ServerScreen } from "./src/screens/ServerScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -21,6 +25,7 @@ import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { PlayerScreen } from "./src/screens/PlayerScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tabs = createBottomTabNavigator<MainTabParamList>();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
@@ -42,7 +47,8 @@ function BootScreen() {
       try {
         await me();
         void syncPreferences().catch((err) => console.error("[preferences] sync failed", err));
-        navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+        void syncTvInput().catch((err) => console.error("[tv-input] sync failed", err));
+        navigation.reset({ index: 0, routes: [{ name: "Main" }] });
       } catch {
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });
       }
@@ -81,7 +87,35 @@ const Requests = withUser(RequestsScreen);
 const Settings = withUser(SettingsScreen);
 const Details = withUser(DetailsScreen);
 
+/** Visited tabs stay mounted so switching back does not rebuild the page. */
+function MainTabs() {
+  return (
+    <MainTabContext.Provider value>
+      <Tabs.Navigator
+        initialRouteName="Home"
+        backBehavior="initialRoute"
+        // Chrome draws the top nav inside each screen.
+        tabBar={() => null}
+        screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: webBg } }}
+      >
+        <Tabs.Screen name="Home" component={Home} />
+        <Tabs.Screen name="Movies" component={Movies} />
+        <Tabs.Screen name="Series" component={Series} />
+        <Tabs.Screen name="Live" component={Live} />
+      </Tabs.Navigator>
+    </MainTabContext.Provider>
+  );
+}
+
 export function App() {
+  // Favourites change inside the app; push them to the system guide when the user leaves.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background") TvInput.requestSync();
+    });
+    return () => sub.remove();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <StatusBar style="light" hidden />
@@ -99,11 +133,8 @@ export function App() {
           <Stack.Screen name="Boot" component={BootScreen} />
           <Stack.Screen name="Server" component={ServerScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Home" component={Home} />
-          <Stack.Screen name="Movies" component={Movies} />
-          <Stack.Screen name="Series" component={Series} />
+          <Stack.Screen name="Main" component={MainTabs} />
           <Stack.Screen name="Search" component={Search} />
-          <Stack.Screen name="Live" component={Live} />
           <Stack.Screen name="Downloads" component={Downloads} />
           <Stack.Screen name="Requests" component={Requests} />
           <Stack.Screen name="Settings" component={Settings} />

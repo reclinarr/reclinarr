@@ -1,4 +1,4 @@
-# App store review demo for Coolify: Reclinarr + Jellyfin only (no Seerr, no IPTV).
+# App store review demo for Coolify: Reclinarr + Jellyfin + Dispatcharr for live channels (no Seerr).
 # Coolify's proxy serves HTTPS: set the reclinarr service's domain to https://<demo domain>:8787
 # and RECLINARR_PUBLIC_URL to https://<demo domain> in the Coolify UI.
 #
@@ -9,6 +9,10 @@
 # (ssh -L 8096:localhost:8096 <host>, then http://localhost:8096): create an admin, add a
 # library at /media/movies, then create the reviewer user (default name apple_demo) with
 # access to that library only.
+#
+# Dispatcharr the same way (ssh -L 9191:localhost:9191 <host>, then http://localhost:9191):
+# create an admin, add an M3U account with only free broadcaster channels, create an API key
+# under Settings → API Keys, set it as DISPATCHARR_API_KEY in Coolify, and redeploy.
 
 services:
   reclinarr:
@@ -26,11 +30,14 @@ services:
       # Only Coolify's proxy reaches this container; trust it so login rate limits see client IPs.
       RECLINARR_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       JELLYFIN_URL: http://jellyfin:8096
+      DISPATCHARR_URL: http://dispatcharr:9191
+      DISPATCHARR_API_KEY: ${DISPATCHARR_API_KEY}
       RECLINARR_DEMO_USERS: ${RECLINARR_DEMO_USERS:-apple_demo}
     volumes:
       - reclinarr-data:/data
     depends_on:
       - jellyfin
+      - dispatcharr
     restart: unless-stopped
 
   jellyfin:
@@ -43,7 +50,21 @@ services:
       - /srv/reclinarr-demo/media:/media:ro
     restart: unless-stopped
 
+  dispatcharr:
+    image: ghcr.io/dispatcharr/dispatcharr:0.33.0
+    ports:
+      - "127.0.0.1:9191:9191"
+    environment:
+      DISPATCHARR_ENV: aio
+      REDIS_HOST: localhost
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      DISPATCHARR_LOG_LEVEL: info
+    volumes:
+      - dispatcharr-data:/data
+    restart: unless-stopped
+
 volumes:
   reclinarr-data:
   jellyfin-config:
   jellyfin-cache:
+  dispatcharr-data:
