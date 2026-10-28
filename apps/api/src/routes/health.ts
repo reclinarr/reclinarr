@@ -1,12 +1,18 @@
+import { createRequire } from "node:module";
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
+
+const { version } = createRequire(import.meta.url)("../../package.json") as { version: string };
+const commit = process.env.RECLINARR_COMMIT;
 
 export async function registerHealthRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   /** Public liveness — no provider details. */
   app.get("/api/health", async () => ({
     status: "ok",
     service: "reclinarr",
+    version,
+    ...(commit ? { commit } : {}),
   }));
 
   /** Authenticated provider posture for operators / UI. */

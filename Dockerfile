@@ -44,6 +44,8 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /data/hls \
   && chown -R node:node /data /run/nginx /var/log/nginx /var/lib/nginx
 
+ARG RECLINARR_COMMIT
+ENV RECLINARR_COMMIT=$RECLINARR_COMMIT
 ENV RECLINARR_MEDIA_PLANE=nginx
 ENV RECLINARR_EMBED_PACKAGER=false
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
