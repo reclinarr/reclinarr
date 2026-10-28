@@ -8,7 +8,7 @@ COMPOSE := docker compose --env-file .env -f docker/docker-compose.yml
 
 .PHONY: help setup install libs dev dev-mock dev-api dev-web mobile tv adb-reverse ios android tv-android \
 	prebuild-mobile prebuild-tv build typecheck lint test check test-live e2e-web e2e-ios e2e-tv \
-	docker-up docker-down docker-logs docker-build clean clean-all
+	docker-up docker-down docker-logs docker-build release clean clean-all
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -113,6 +113,12 @@ docker-logs: ## Follow container logs
 
 docker-build: ## Build the image without starting it
 	$(COMPOSE) build
+
+##@ Release
+
+release: ## Bump every package and app to VERSION and commit: make release VERSION=0.2.0
+	@test -n "$(VERSION)" || { echo "VERSION is required: make release VERSION=0.2.0"; exit 1; }
+	node scripts/release.mjs $(VERSION)
 
 ##@ Cleanup
 
