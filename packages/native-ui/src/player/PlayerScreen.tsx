@@ -355,6 +355,10 @@ export function PlayerScreen({
       togglePause();
       return;
     }
+    if (eventType === "channelUp" || eventType === "channelDown") {
+      if (isLive) void zap(eventType === "channelUp" ? 1 : -1);
+      return;
+    }
     if (["up", "down", "left", "right"].includes(eventType)) {
       if (!controls && menu === "none") {
         if (eventType === "left") skipBy(-SKIP_S);
