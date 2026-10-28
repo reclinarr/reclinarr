@@ -2,7 +2,7 @@
 #   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 #   docker compose -f docker/docker-compose.yml up -d --build
 
-FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
@@ -18,7 +18,7 @@ RUN npm run build -w @reclinarr/providers
 RUN npm run build -w @reclinarr/api
 RUN npm run build -w @reclinarr/web
 
-FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS runtime
+FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # nginx (media plane) + ffmpeg/ffprobe (HLS packager) + gettext (envsubst).
