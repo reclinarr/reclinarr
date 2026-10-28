@@ -53,7 +53,7 @@ export const JellyfinItemSchema = z
     ParentIndexNumber: z.number().optional().nullable(),
     IndexNumber: z.number().optional().nullable(),
     SeriesId: z.string().optional().nullable(),
-    ProviderIds: z.record(z.string().nullable()).optional().nullable(),
+    ProviderIds: z.record(z.string(), z.string().nullable()).optional().nullable(),
     MediaSources: z
       .array(
         z
@@ -70,7 +70,7 @@ export const JellyfinItemSchema = z
       )
       .optional()
       .nullable(),
-    ImageTags: z.record(z.string()).optional().nullable(),
+    ImageTags: z.record(z.string(), z.string()).optional().nullable(),
     BackdropImageTags: z.array(z.string()).optional().nullable(),
     UserData: JellyfinUserDataSchema,
   })
