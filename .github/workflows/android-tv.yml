@@ -28,6 +28,8 @@ concurrency:
 jobs:
   build:
     name: Compile TV app and tv-input module
+    # GitHub-hosted: needs Java and the Android SDK, and a React Native Gradle build
+    # does not fit the 4 GB limit of our own runners.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

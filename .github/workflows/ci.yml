@@ -19,10 +19,15 @@ env:
   RECLINARR_TELEMETRY_DISABLED: "true"
   EXPO_NO_TELEMETRY: "1"
 
+# Runners: Node-only jobs use our own `reclinarr-servers` runners (2 CPU / 4 GB, no Docker).
+# Pull requests from forks are untrusted code, so they always go to GitHub-hosted runners
+# instead of a server we share with other services. Docker jobs stay GitHub-hosted because
+# our runners have no Docker.
+
 jobs:
   check:
     name: Typecheck, test, build
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'reclinarr-servers' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,7 +39,12 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       # API and web import the libraries' dist/, so they must exist before typecheck.
-      - run: make libs
+      # Same order as `make libs` (the runner image has no make): client and providers import shared.
+      - name: Build libraries
+        run: |
+          for lib in shared client providers; do
+            node_modules/.bin/tsc -p "packages/$lib/tsconfig.json"
+          done
       - run: npm run typecheck
       - run: npm test
       - name: Production build (API + web)
@@ -44,7 +54,7 @@ jobs:
 
   audit:
     name: Dependency audit
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'reclinarr-servers' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,7 +77,7 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'reclinarr-servers' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,7 +89,7 @@ jobs:
 
   docker:
     name: Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # needs Docker; our runners have none
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,7 +123,7 @@ jobs:
     name: Publish image
     if: github.event_name == 'push'
     needs: [check, docker]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # needs Docker buildx + QEMU; our runners have none
     timeout-minutes: 90
     permissions:
       contents: read
