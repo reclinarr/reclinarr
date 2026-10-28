@@ -4,7 +4,7 @@
 # Compose reads `${...}` values from a .env next to this file unless --env-file is given,
 # so --env-file makes RECLINARR_PORT and the PostHog build arg come from the root .env.
 #
-# Build image from GitHub without a checkout: see docker-compose.git.yml.
+# Run the published image without a checkout: see docker-compose.image.yml.
 
 services:
   reclinarr:

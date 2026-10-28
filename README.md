@@ -83,21 +83,27 @@ Run `make` to list every target.
 
 ## Docker
 
-From a local checkout:
+Run the published image (Docker Hub, also at `ghcr.io/reclinarr/reclinarr`; amd64 and arm64):
 
 ```bash
 cp .env.example .env
+docker run -d --name reclinarr --init --restart unless-stopped --env-file .env -p 8787:8787 -v reclinarr-data:/data reclinarr/reclinarr
+```
+
+Or with compose: put [`docker/docker-compose.image.yml`](./docker/docker-compose.image.yml) and a `.env` in one folder and run `docker compose -f docker-compose.image.yml up -d` there. `latest` is the newest release, `0.1` follows that minor line, `edge` tracks `main`.
+
+To build from a local checkout instead:
+
+```bash
 docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
-Build the image straight from GitHub (Dockerfile at repo root):
+Or build straight from GitHub (Dockerfile at repo root):
 
 ```bash
 docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 docker run --init --env-file .env -p 8787:8787 -v reclinarr-data:/data reclinarr
 ```
-
-Or compose with a Git build context, no checkout needed: put [`docker/docker-compose.git.yml`](./docker/docker-compose.git.yml) and a `.env` in one folder and run `docker compose -f docker-compose.git.yml up -d --build` there.
 
 The container runs as uid/gid 1000. If `/data` is a host bind mount owned by someone else, set `PUID`/`PGID` to that owner.
 
