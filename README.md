@@ -1,5 +1,7 @@
 # Reclinarr
 
+[![CI](https://github.com/reclinarr/reclinarr/actions/workflows/ci.yml/badge.svg)](https://github.com/reclinarr/reclinarr/actions/workflows/ci.yml) [![CodeQL](https://github.com/reclinarr/reclinarr/actions/workflows/codeql.yml/badge.svg)](https://github.com/reclinarr/reclinarr/actions/workflows/codeql.yml)
+
 **Your media. One stream.**
 
 A unified self-hosted streaming application for your movies, series and live TV.
