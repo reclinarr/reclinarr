@@ -1,18 +1,15 @@
-# Build & run Reclinarr from the public GitHub repository, no checkout needed.
+# Run the published Reclinarr image, no checkout needed.
 # Put this file and a .env (from .env.example) in the same folder, then from that folder:
 #
-#   docker compose -f docker-compose.git.yml up -d --build
+#   docker compose -f docker-compose.image.yml up -d
 #
-# Image-only (no compose):
-#   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
-#   docker run --init --env-file .env -p 8787:8787 -v reclinarr-data:/data reclinarr
+# Update with: docker compose -f docker-compose.image.yml pull && docker compose -f docker-compose.image.yml up -d
 
 services:
   reclinarr:
-    build:
-      context: https://github.com/reclinarr/reclinarr.git#main
-      dockerfile: Dockerfile
-    image: reclinarr:git
+    # `latest` is the newest release. Pin a version (0.1.0) or follow a minor line (0.1)
+    # to control upgrades; `edge` tracks main.
+    image: reclinarr/reclinarr:latest
     container_name: reclinarr
     # Reaps orphaned processes (ffmpeg) and forwards signals to the entrypoint.
     init: true
