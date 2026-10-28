@@ -133,7 +133,11 @@ export class MockSeerrProvider implements DiscoveryProvider, RequestProvider {
     return details?.availability.find((a) => a.provider === "seerr") ?? null;
   }
 
-  async requestMedia(identity: MediaIdentity): Promise<void> {
+  async seerrUserIdForJellyfin(): Promise<number | null> {
+    return 1;
+  }
+
+  async requestMedia(identity: MediaIdentity, _opts: { asUser: number }): Promise<void> {
     if (!identity.tmdbId || (identity.mediaType !== "movie" && identity.mediaType !== "tv")) {
       throw new Error("Mock Seerr requires tmdbId");
     }
@@ -141,6 +145,7 @@ export class MockSeerrProvider implements DiscoveryProvider, RequestProvider {
   }
 
   async listRequests(opts?: {
+    asUser: number;
     take?: number;
     skip?: number;
     mediaType?: "movie" | "tv" | "all";

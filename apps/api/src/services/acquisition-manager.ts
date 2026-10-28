@@ -500,6 +500,8 @@ export class AcquisitionManager {
         } else if (finalJob.localPath !== dest && existsSync(finalJob.localPath)) {
           await mkdir(dirname(dest), { recursive: true });
           moveIntoLibrary(finalJob.localPath, dest);
+          // Same as promoteToLibrary: the library file replaces the cache's HLS copy.
+          removeHlsDir(this.dataDir, id);
           this.patch(id, {
             state: "completed",
             localPath: dest,

@@ -73,6 +73,35 @@ describe("session resolution", () => {
     expect(me.statusCode).toBe(200);
   });
 
+  it("accepts the query-string session only for GET media and image routes", async () => {
+    const { app, login } = await start();
+    const session = await login("alice");
+    const q = `reclinarr_session=${session.id}`;
+    expect((await app.inject({ method: "GET", url: `/api/auth/me?${q}` })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: `/api/live/stop?${q}`, payload: {} })).statusCode).toBe(401);
+    // Authenticated (passes requireAuth); mock mode then answers 404 for the image itself.
+    expect((await app.inject({ method: "GET", url: `/api/images/dispatcharr/logo/1?${q}` })).statusCode).toBe(404);
+  });
+
+  it("revokes the Jellyfin token on logout", async () => {
+    const { app, ctx, login } = await start();
+    const session = await login("alice");
+    const logout = vi.spyOn(ctx.jellyfin, "logout");
+    await app.inject({ method: "POST", url: "/api/auth/logout", headers: { [SESSION_HEADER]: session.id } });
+    expect(logout).toHaveBeenCalledWith(expect.objectContaining({ jellyfinAccessToken: "tok-alice" }));
+  });
+
+  it("sends baseline browser protections on every response", async () => {
+    const { app } = await start();
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+    expect(res.headers).toMatchObject({
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
+      "referrer-policy": "same-origin",
+      "content-security-policy": "frame-ancestors 'self'",
+    });
+  });
+
   it("releases the live tune on logout", async () => {
     const { app, ctx, login } = await start();
     const session = await login("alice");

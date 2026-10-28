@@ -52,6 +52,14 @@ describe("live tuning", () => {
   });
 });
 
+describe("live HLS segments", () => {
+  it("refuse sessions that are not tuned to the channel", async () => {
+    const { app, headers } = await start();
+    const res = await app.inject({ method: "GET", url: `/api/playback/dispatcharr/live/${KNOWN}/hls/seg0.ts`, headers });
+    expect(res.statusCode).toBe(409);
+  });
+});
+
 describe("live guide window", () => {
   it("rejects windows longer than 24 hours, reversed, or not ISO dates", async () => {
     const { app, ctx, headers } = await start();

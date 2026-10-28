@@ -22,7 +22,7 @@ async function isAdmin(ctx: AppContext, req: FastifyRequest): Promise<boolean> {
   return ctx.jellyfin.isAdministrator(userContext);
 }
 
-async function requireAdmin(ctx: AppContext, req: FastifyRequest): Promise<void> {
+export async function requireAdmin(ctx: AppContext, req: FastifyRequest): Promise<void> {
   if (!(await isAdmin(ctx, req))) throw httpError("Only Jellyfin administrators can change services", 403);
 }
 

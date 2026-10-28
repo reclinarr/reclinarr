@@ -95,8 +95,15 @@ class ReclinarrApi(private val credentials: Credentials) {
   private fun mediaUrl(path: String): String {
     val absolute = if (path.startsWith("http://") || path.startsWith("https://")) path else credentials.serverUrl + path
     val uri = Uri.parse(absolute)
-    if (uri.path?.startsWith("/api/") != true) return absolute
+    if (uri.path?.startsWith("/api/") != true || !isServer(absolute)) return absolute
     return uri.buildUpon().appendQueryParameter(SESSION_PARAM, credentials.sessionId).build().toString()
+  }
+
+  /** The session only goes to the configured Reclinarr server, never to another host. */
+  private fun isServer(url: String): Boolean {
+    val target = Uri.parse(url)
+    val server = Uri.parse(credentials.serverUrl)
+    return target.scheme == server.scheme && target.host == server.host && target.port == server.port
   }
 
   private fun request(method: String, path: String, body: JSONObject? = null): String {
@@ -121,7 +128,7 @@ class ReclinarrApi(private val credentials: Credentials) {
       connectTimeout = CONNECT_TIMEOUT_MS
       // The guide route waits up to 60s on Dispatcharr's grid.
       readTimeout = READ_TIMEOUT_MS
-      setRequestProperty(SESSION_HEADER, credentials.sessionId)
+      if (isServer(url)) setRequestProperty(SESSION_HEADER, credentials.sessionId)
     }
 
   private fun checkStatus(conn: HttpURLConnection, method: String, path: String) {

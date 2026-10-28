@@ -14,7 +14,7 @@ import {
 import Svg, { Circle } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isWatchedByAvailability, pickNextUpEpisode } from "@reclinarr/shared";
-import type { Acquisition, CreditPerson, EpisodeListItem, Media, MediaIdentity } from "@reclinarr/shared";
+import type { Acquisition, CreditPerson, EpisodeListItem, Media } from "@reclinarr/shared";
 import {
   actionLabel,
   cancelAcquisition,

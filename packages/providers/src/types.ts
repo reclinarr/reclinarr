@@ -101,11 +101,15 @@ export interface MediaRequestSummary {
 
 export interface RequestProvider extends MediaProvider {
   getRequestAvailability(identity: MediaIdentity): Promise<Media["availability"][number] | null>;
+  /** The Seerr account imported for this Jellyfin user, or null when there is none. */
+  seerrUserIdForJellyfin(jellyfinUserId: string): Promise<number | null>;
+  /** Runs as `asUser`, so that Seerr account's permissions, quotas and 4K rights apply. */
   requestMedia(
     identity: MediaIdentity,
-    opts?: { seasons?: number[] | "all"; is4k?: boolean },
+    opts: { asUser: number; seasons?: number[] | "all"; is4k?: boolean },
   ): Promise<void>;
-  listRequests?(opts?: {
+  listRequests?(opts: {
+    asUser: number;
     take?: number;
     skip?: number;
     filter?: string;
@@ -160,9 +164,8 @@ export interface LiveTvProvider extends MediaProvider {
   resolveLivePlayback(channelUuid: string): Promise<PlaybackSource | null>;
 }
 
-export interface AcquisitionSourceProvider extends MediaProvider {
-  // Phase 5 — resolve AcquisitionSource from identity
-}
+// Phase 5 — resolve AcquisitionSource from identity
+export type AcquisitionSourceProvider = MediaProvider;
 
 export interface UserContext {
   jellyfinUserId: string;

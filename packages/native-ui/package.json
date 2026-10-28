@@ -12,8 +12,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'no tests'",
-    "lint": "echo 'no lint configured'"
+    "test": "echo 'no tests'"
   },
   "dependencies": {
     "@reclinarr/client": "*",

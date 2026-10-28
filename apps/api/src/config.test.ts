@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, sessionCookieSecure } from "./config.js";
 
 describe("Reclinarr configuration", () => {
   it("loads server settings and data paths from RECLINARR variables", () => {
@@ -43,5 +43,12 @@ describe("Reclinarr configuration", () => {
 
   it("rejects a public URL that is not a URL", () => {
     expect(() => loadConfig({ RECLINARR_PUBLIC_URL: "reclinarr.example" })).toThrow();
+  });
+});
+
+describe("sessionCookieSecure", () => {
+  it("follows the public URL scheme, not NODE_ENV (plain-HTTP Docker would drop a Secure cookie)", () => {
+    expect(sessionCookieSecure(loadConfig({ NODE_ENV: "production", RECLINARR_PUBLIC_URL: "http://192.168.1.5:8787" }))).toBe(false);
+    expect(sessionCookieSecure(loadConfig({ RECLINARR_PUBLIC_URL: "https://media.example" }))).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export function hlsDir(dataDir: string, acquisitionId: string): string {
@@ -32,6 +32,18 @@ export function hlsFinalized(dataDir: string, acquisitionId: string): boolean {
 }
 
 /** Remove HLS output for an acquisition (TTL eviction / promote). */
+/** Bytes in an acquisition's HLS sidecar (a stream copy, so roughly the size of the file). */
+export function hlsDirBytes(dataDir: string, acquisitionId: string): number {
+  const dir = hlsDir(dataDir, acquisitionId);
+  if (!existsSync(dir)) return 0;
+  let total = 0;
+  for (const name of readdirSync(dir)) {
+    const st = statSync(join(dir, name));
+    if (st.isFile()) total += st.size;
+  }
+  return total;
+}
+
 export function removeHlsDir(dataDir: string, acquisitionId: string): void {
   const dir = hlsDir(dataDir, acquisitionId);
   if (!existsSync(dir)) return;

@@ -106,6 +106,17 @@ export async function buildApp(ctx: AppContext, opts: { onSetupSaved: () => void
       },
     );
   });
+  // Baseline browser protections for every response, including the web app: no MIME sniffing,
+  // no framing by other sites (clickjacking), and no session-bearing URLs leaked as Referer.
+  app.addHook("onSend", async (_req, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "SAMEORIGIN");
+    reply.header("Referrer-Policy", "same-origin");
+    if (!reply.hasHeader("Content-Security-Policy")) {
+      reply.header("Content-Security-Policy", "frame-ancestors 'self'");
+    }
+    return payload;
+  });
   app.addHook("onResponse", (req, reply) => {
     if (!req.session) return;
     const operation = apiMetricOperation(req.routeOptions.url ?? "");

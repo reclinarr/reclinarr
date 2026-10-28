@@ -52,7 +52,8 @@ export function playbackMediaUrl(
   if (!sessionId) return href;
   try {
     const parsed = new URL(href);
-    if (!parsed.pathname.startsWith("/api/")) return href;
+    // Only Reclinarr's own API gets the session, never another host's /api/ path.
+    if (!parsed.pathname.startsWith("/api/") || parsed.origin !== new URL(origin).origin) return href;
     parsed.searchParams.set(SESSION_COOKIE, sessionId);
     return parsed.href;
   } catch {

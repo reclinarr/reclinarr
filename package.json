@@ -20,7 +20,7 @@
     "test:e2e:web": "maestro test --platform web .maestro/web",
     "test:e2e:ios": "maestro test --platform ios .maestro/ios",
     "test:e2e:tv": "maestro test --platform android .maestro/tv",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "eslint ."
   },
   "overrides": {
     "react-native": "npm:react-native-tvos@0.86.3-0",
@@ -37,5 +37,11 @@
     "esbuild@0.25.12": true,
     "better-sqlite3@13.0.3": true,
     "fsevents@2.3.3": true
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript-eslint": "^8.72.1"
   }
 }

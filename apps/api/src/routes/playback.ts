@@ -11,12 +11,15 @@ import {
 import { DispatcharrProvider, JellyfinProvider } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
 import { isDemoSession, requireAuth, requireFullAccess } from "../plugins/auth.js";
+import { requireAdmin } from "./admin.js";
 import { IptvProgressStore } from "../services/iptv-progress.js";
 import { hlsDir, hlsPlaybackReady } from "../services/hls-paths.js";
 import { liveHlsReady } from "../services/live-hls.js";
 import { releaseLivePlayback } from "../services/live-playback.js";
 import {
-  mediaPlaneIsNginx,
+  nginxServesProvider,
+  safeProxiedContentType,
+  sandboxProxiedContent,
   sendAccelRedirect,
   upstreamAccelPath,
 } from "../services/media-plane.js";
@@ -32,7 +35,8 @@ export async function registerPlaybackRoutes(
   ctx: AppContext,
 ): Promise<void> {
   const iptvProgress = new IptvProgressStore(ctx.db);
-  const nginxPlane = mediaPlaneIsNginx(ctx.config);
+  const jellyfinAccel = nginxServesProvider(ctx.config, "jellyfin");
+  const dispatcharrAccel = nginxServesProvider(ctx.config, "dispatcharr");
 
   app.post("/api/playback/resolve", async (req) => {
     const { userContext, session } = await requireAuth(req);
@@ -91,7 +95,7 @@ export async function registerPlaybackRoutes(
       userContext,
       query.itemId,
     );
-    if (nginxPlane) {
+    if (jellyfinAccel) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: true,
         contentType: "application/octet-stream",
@@ -267,7 +271,7 @@ export async function registerPlaybackRoutes(
     const looksLikePlaylist =
       query.playMethod === "Transcode" && isPlaylistPath(query.transcodingPath ?? "");
 
-    if (nginxPlane && !looksLikePlaylist) {
+    if (jellyfinAccel && !looksLikePlaylist) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: false,
       });
@@ -300,15 +304,15 @@ export async function registerPlaybackRoutes(
       return reply.send(rewritten);
     }
 
-    if (nginxPlane) {
+    if (jellyfinAccel) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: false,
-        contentType: ct || undefined,
+        contentType: ct ? safeProxiedContentType(ct, "media") : undefined,
       });
     }
 
     reply.status(upstream.status);
-    if (ct) reply.header("Content-Type", ct);
+    sandboxProxiedContent(reply).header("Content-Type", safeProxiedContentType(ct, "media"));
     const cl = upstream.headers.get("content-length");
     if (cl) reply.header("Content-Length", cl);
     const contentRange = upstream.headers.get("content-range");
@@ -413,51 +417,50 @@ export async function registerPlaybackRoutes(
       return reply.send("Mock live stream — configure DISPATCHARR auth for real playback.");
     }
 
-    try {
-      if (nginxPlane) {
-        // API returns 204 immediately; nginx keeps Dispatcharr open. Hold the live
-        // slot until another channel is tuned (see holdLive).
-        ctx.iptvConnections.holdLive(params.uuid);
-        const target = await ctx.dispatcharr.resolveLiveStreamTarget({ uuid: params.uuid });
-        return sendAccelRedirect(reply, upstreamAccelPath("dispatcharr", target.url), {
-          contentType: "video/mp2t",
-          buffering: false,
-        });
-      }
-
-      const lease = ctx.iptvConnections.acquire("live", { label: `live:${params.uuid}` });
-      const cleanup = () => lease.release();
-      reply.raw.on("close", cleanup);
-
-      const upstream = await ctx.dispatcharr.openLiveStream({
-        uuid: params.uuid,
-        signal: lease.signal,
+    if (dispatcharrAccel) {
+      // API returns 204 immediately; nginx keeps Dispatcharr open. Hold the live
+      // slot until another channel is tuned (see holdLive).
+      ctx.iptvConnections.holdLive(params.uuid);
+      const target = await ctx.dispatcharr.resolveLiveStreamTarget({ uuid: params.uuid });
+      return sendAccelRedirect(reply, upstreamAccelPath("dispatcharr", target.url), {
+        contentType: "video/mp2t",
+        buffering: false,
       });
-      if (!upstream.ok) {
-        cleanup();
-        const errText = await upstream.text().catch(() => "");
-        return reply.status(upstream.status).send({
-          error:
-            formatIptvUpstreamError(upstream.status, errText) ??
-            (errText || `Dispatcharr live stream failed (${upstream.status})`),
-        });
-      }
-
-      reply.status(upstream.status);
-      reply.header("Content-Type", upstream.headers.get("content-type") ?? "video/mp2t");
-      reply.header("Cache-Control", "no-store, no-transform");
-      reply.header("X-Accel-Buffering", "no");
-      if (!upstream.body) {
-        cleanup();
-        return reply.send(Buffer.from(await upstream.arrayBuffer()));
-      }
-      // Do not cancel() the body on lease abort — once reply.send() pipes it the
-      // stream is locked and cancel() crashes the process (ERR_INVALID_STATE).
-      // Aborting lease.signal cancels the upstream fetch instead.
-      return reply.send(upstream.body);
-    } catch (err) {
-      throw err;
     }
+
+    const lease = ctx.iptvConnections.acquire("live", { label: `live:${params.uuid}` });
+    const cleanup = () => lease.release();
+    reply.raw.on("close", cleanup);
+
+    const upstream = await ctx.dispatcharr.openLiveStream({
+      uuid: params.uuid,
+      signal: lease.signal,
+    });
+    if (!upstream.ok) {
+      cleanup();
+      const errText = await upstream.text().catch(() => "");
+      return reply.status(upstream.status).send({
+        error:
+          formatIptvUpstreamError(upstream.status, errText) ??
+          (errText || `Dispatcharr live stream failed (${upstream.status})`),
+      });
+    }
+
+    reply.status(upstream.status);
+    sandboxProxiedContent(reply).header(
+      "Content-Type",
+      safeProxiedContentType(upstream.headers.get("content-type") ?? "video/mp2t", "media"),
+    );
+    reply.header("Cache-Control", "no-store, no-transform");
+    reply.header("X-Accel-Buffering", "no");
+    if (!upstream.body) {
+      cleanup();
+      return reply.send(Buffer.from(await upstream.arrayBuffer()));
+    }
+    // Do not cancel() the body on lease abort — once reply.send() pipes it the
+    // stream is locked and cancel() crashes the process (ERR_INVALID_STATE).
+    // Aborting lease.signal cancels the upstream fetch instead.
+    return reply.send(upstream.body);
   });
 
   /**
@@ -507,13 +510,17 @@ export async function registerPlaybackRoutes(
   });
 
   app.get("/api/playback/dispatcharr/live/:uuid/hls/:segment", async (req, reply) => {
-    await requireAuth(req);
+    const { session } = await requireAuth(req);
     const params = z
       .object({
         uuid: z.guid(),
         segment: z.string().min(1).regex(/^[\w.-]+$/),
       })
       .parse(req.params);
+    // Only viewers tuned to this channel may read (and keep alive) its remux.
+    if (!ctx.liveHls.heartbeat(session.id, params.uuid)) {
+      return reply.status(409).send({ error: "Channel is no longer selected" });
+    }
 
     ctx.liveHls.touch(params.uuid);
     const filePath = ctx.liveHls.filePath(params.uuid, params.segment);
@@ -532,7 +539,8 @@ export async function registerPlaybackRoutes(
    * Debug / raw Dispatcharr VOD proxy (no remux). Normal Play uses auto-cache + HLS.
    */
   app.get("/api/playback/dispatcharr/vod/:uuid", async (req, reply) => {
-    await requireFullAccess(ctx, req);
+    // Debug-only route (normal playback goes through the HLS cache): admins only.
+    await requireAdmin(ctx, req);
     const params = z.object({ uuid: z.guid() }).parse(req.params);
     const query = z
       .object({
@@ -556,55 +564,40 @@ export async function registerPlaybackRoutes(
       });
     }
 
-    try {
-      if (nginxPlane) {
-        // Debug raw VOD via nginx: lease until preempted (API returns 204 immediately).
-        ctx.iptvConnections.acquire("playback", { label: `vod:${params.uuid}` });
-        const target = await ctx.dispatcharr.resolveVodStreamTarget({
-          uuid: params.uuid,
-          kind: query.kind,
-          streamId: query.streamId,
-        });
-        return sendAccelRedirect(reply, upstreamAccelPath("dispatcharr", target.url), {
-          buffering: false,
-        });
-      }
+    // Always streamed by the API, never handed to nginx: an X-Accel hand-off gives no
+    // disconnect signal, so its IPTV lease could never be released.
+    const lease = ctx.iptvConnections.acquire("playback", {
+      label: `vod:${params.uuid}`,
+    });
+    const cleanup = () => lease.release();
+    reply.raw.on("close", cleanup);
 
-      const lease = ctx.iptvConnections.acquire("playback", {
-        label: `vod:${params.uuid}`,
+    const upstream = await ctx.dispatcharr.openVodStream({
+      uuid: params.uuid,
+      kind: query.kind,
+      streamId: query.streamId,
+      signal: lease.signal,
+    });
+
+    if (!upstream.ok) {
+      cleanup();
+      const errText = await upstream.text().catch(() => "");
+      return reply.status(upstream.status).send({
+        error:
+          formatIptvUpstreamError(upstream.status, errText) ??
+          (errText || `Dispatcharr stream failed (${upstream.status})`),
       });
-      const cleanup = () => lease.release();
-      reply.raw.on("close", cleanup);
-
-      const upstream = await ctx.dispatcharr.openVodStream({
-        uuid: params.uuid,
-        kind: query.kind,
-        streamId: query.streamId,
-        signal: lease.signal,
-      });
-
-      if (!upstream.ok) {
-        cleanup();
-        const errText = await upstream.text().catch(() => "");
-        return reply.status(upstream.status).send({
-          error:
-            formatIptvUpstreamError(upstream.status, errText) ??
-            (errText || `Dispatcharr stream failed (${upstream.status})`),
-        });
-      }
-
-      reply.status(upstream.status);
-      reply.header("Cache-Control", "no-store");
-      const ct = upstream.headers.get("content-type");
-      if (ct) reply.header("Content-Type", ct);
-      if (!upstream.body) {
-        cleanup();
-        return reply.send(Buffer.from(await upstream.arrayBuffer()));
-      }
-      return reply.send(upstream.body);
-    } catch (err) {
-      throw err;
     }
+
+    reply.status(upstream.status);
+    reply.header("Cache-Control", "no-store");
+    const ct = upstream.headers.get("content-type");
+    sandboxProxiedContent(reply).header("Content-Type", safeProxiedContentType(ct, "media"));
+    if (!upstream.body) {
+      cleanup();
+      return reply.send(Buffer.from(await upstream.arrayBuffer()));
+    }
+    return reply.send(upstream.body);
   });
 
   /** Text subtitles Jellyfin already indexed (including Bazarr sidecars). */
@@ -676,7 +669,7 @@ export async function registerPlaybackRoutes(
       jellyfinPath: path.startsWith("/") ? path : `/${path}`,
     });
 
-    if (nginxPlane && !isPlaylistPath(path)) {
+    if (jellyfinAccel && !isPlaylistPath(path)) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: false,
       });
@@ -706,15 +699,15 @@ export async function registerPlaybackRoutes(
       return reply.send(rewritten);
     }
 
-    if (nginxPlane) {
+    if (jellyfinAccel) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: false,
-        contentType: ct || undefined,
+        contentType: ct ? safeProxiedContentType(ct, "media") : undefined,
       });
     }
 
     reply.status(upstream.status);
-    if (ct) reply.header("Content-Type", ct);
+    sandboxProxiedContent(reply).header("Content-Type", safeProxiedContentType(ct, "media"));
     const contentRange = upstream.headers.get("content-range");
     if (contentRange) reply.header("Content-Range", contentRange);
     if (!upstream.body) {

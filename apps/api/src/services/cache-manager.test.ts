@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -103,6 +103,23 @@ describe("CacheManager", () => {
     const n = mgr.evict();
     expect(n).toBeGreaterThanOrEqual(1);
     expect(existsSync(aPath)).toBe(true);
+  });
+
+  it("counts each file's HLS sidecar against the size budget", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reclinarr-cache-"));
+    const db = createDb(dir);
+    const t = new Date(Date.now() - DAY).toISOString();
+    const older = new Date(Date.now() - 2 * DAY).toISOString();
+    seedCache(db, { id: "a", path: join(dir, "a.bin"), bytes: 600, updatedAt: older });
+    seedCache(db, { id: "b", path: join(dir, "b.bin"), bytes: 600, updatedAt: t });
+    mkdirSync(join(dir, "hls", "a"), { recursive: true });
+    writeFileSync(join(dir, "hls", "a", "seg0.ts"), Buffer.alloc(600));
+
+    // Files alone (1200) fit in 1500; with a's 600-byte sidecar (1800) they do not.
+    const mgr = new CacheManager(db, { maxBytes: 1500, ttlMs: 365 * DAY, dataDir: dir });
+    expect(mgr.evict()).toBe(1);
+    expect(existsSync(join(dir, "a.bin"))).toBe(false);
+    expect(existsSync(join(dir, "b.bin"))).toBe(true);
   });
 
   it("evicts a film 24h after it was watched past 95%, keeps one watched less", () => {

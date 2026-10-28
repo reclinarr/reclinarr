@@ -9,8 +9,7 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --clean",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'no tests'",
-    "lint": "echo 'no lint configured'"
+    "test": "echo 'no tests'"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.1.1",

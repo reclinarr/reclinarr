@@ -19,10 +19,18 @@ function sessionIdFromRequest(req: FastifyRequest): string | undefined {
   const fromCookie = req.cookies[SESSION_COOKIE];
   if (fromCookie) return fromCookie;
   // React Native Image often cannot attach custom headers; TV artwork uses ?reclinarr_session=.
+  // URLs leak (logs, Referer, history), so the query credential only reads media and images.
+  if (!queryCredentialAllowed(req)) return undefined;
   const query = req.query as Record<string, unknown> | undefined;
   const fromQuery = query?.[SESSION_COOKIE];
   if (typeof fromQuery === "string" && fromQuery.trim()) return fromQuery.trim();
   return undefined;
+}
+
+function queryCredentialAllowed(req: FastifyRequest): boolean {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  const path = req.url.split("?", 1)[0]!;
+  return path.startsWith("/api/playback/") || path.startsWith("/api/images/");
 }
 
 function toUserContext(session: SessionRecord): UserContext {

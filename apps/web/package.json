@@ -9,8 +9,7 @@
     "build": "expo export -p web --output-dir dist",
     "postbuild": "node scripts/finalize-export.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'no tests'",
-    "lint": "echo 'no lint configured'"
+    "test": "echo 'no tests'"
   },
   "dependencies": {
     "@react-navigation/native": "^7.1.17",
