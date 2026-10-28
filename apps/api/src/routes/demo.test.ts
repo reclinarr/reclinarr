@@ -65,6 +65,38 @@ describe("demo accounts", () => {
     expect(acquire.statusCode).toBe(403);
   });
 
+  it("never reaches IPTV through playback or the cache routes", async () => {
+    const { app, ctx, headers } = await start("reviewer");
+    const iptvOnly = { tmdbId: 200, mediaType: "movie" };
+    const resolve = await app.inject({ method: "POST", url: "/api/playback/resolve", headers, payload: { identity: iptvOnly } });
+    expect(resolve.statusCode).toBe(404);
+    expect(ctx.acquisitions.list()).toEqual([]);
+
+    const job = "00000000-0000-4000-8000-000000000001";
+    for (const url of [
+      "/api/acquisitions",
+      `/api/acquisitions/${job}`,
+      `/api/playback/cache/${job}`,
+      `/api/playback/cache/${job}/hls/index.m3u8`,
+      `/api/playback/cache/${job}/hls/seg0.ts`,
+      `/api/playback/dispatcharr/vod/${job}?raw=1`,
+    ]) {
+      expect((await app.inject({ method: "GET", url, headers })).statusCode, url).toBe(403);
+    }
+  });
+
+  it("still lets regular users resolve IPTV-only titles", async () => {
+    const { app, ctx, headers } = await start("alice");
+    const resolve = await app.inject({
+      method: "POST",
+      url: "/api/playback/resolve",
+      headers,
+      payload: { identity: { tmdbId: 200, mediaType: "movie" } },
+    });
+    expect(resolve.statusCode).toBe(200);
+    expect(ctx.acquisitions.list().length).toBe(1);
+  });
+
   it("hides Seerr discovery and searches the library instead", async () => {
     const { app, ctx, headers } = await start("reviewer");
     const seerrSearch = vi.spyOn(ctx.seerr, "search");

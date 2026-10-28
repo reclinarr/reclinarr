@@ -37,14 +37,14 @@ describe("describeServices", () => {
 });
 
 describe("applyServiceEdit", () => {
-  it("keeps a stored secret when the field is left blank", () => {
+  it("keeps a stored secret when the field is left blank and the address is unchanged", () => {
     const next = applyServiceEdit(
       seerr,
-      { values: { SEERR_URL: "http://new:5055/", SEERR_API_KEY: "" }, clear: [] },
+      { values: { SEERR_URL: "http://old:5055/", SEERR_API_KEY: "" }, clear: [] },
       { SEERR_URL: "http://old:5055", SEERR_API_KEY: "keep-me" },
       none,
     );
-    expect(next).toEqual({ SEERR_URL: "http://new:5055", SEERR_API_KEY: "keep-me" });
+    expect(next).toEqual({ SEERR_URL: "http://old:5055", SEERR_API_KEY: "keep-me" });
   });
 
   it("replaces and clears secrets", () => {
@@ -97,16 +97,49 @@ describe("applyServiceEdit", () => {
     ).toThrow(expect.objectContaining({ statusCode: 409 }));
   });
 
+  it("refuses a new address that would inherit the stored secret", () => {
+    const stored = { DISPATCHARR_URL: "http://d", DISPATCHARR_PASSWORD: "pw" };
+    expect(() =>
+      applyServiceEdit(dispatcharr, { values: { DISPATCHARR_URL: "http://elsewhere" }, clear: [] }, stored, none),
+    ).toThrow(expect.objectContaining({ statusCode: 400 }));
+    expect(
+      applyServiceEdit(dispatcharr, { values: { DISPATCHARR_URL: "http://elsewhere" }, clear: ["DISPATCHARR_PASSWORD"] }, stored, none),
+    ).toEqual({ DISPATCHARR_URL: "http://elsewhere" });
+  });
+
+  it("refuses a new address while Cloudflare Access credentials are configured", () => {
+    expect(() =>
+      applyServiceEdit(dispatcharr, { values: { DISPATCHARR_URL: "http://elsewhere" }, clear: [] }, { DISPATCHARR_URL: "http://d" }, none, ["A Cloudflare Access token"]),
+    ).toThrow(expect.objectContaining({ statusCode: 409 }));
+  });
+
   it("refuses to clear a non-secret field", () => {
     expect(() => applyServiceEdit(seerr, { values: {}, clear: ["SEERR_URL"] }, {}, none)).toThrow(ServiceEditError);
   });
 });
 
 describe("probeInputFor", () => {
-  it("tests with the stored secret when the form leaves it blank", () => {
+  it("tests with the stored secret when the form leaves it blank and keeps the address", () => {
     const config = loadConfig({}, { SEERR_URL: "http://old", SEERR_API_KEY: "stored" });
-    const input = probeInputFor(seerr, { values: { SEERR_URL: "http://new", SEERR_API_KEY: "" }, clear: [] }, config, none);
-    expect(input).toMatchObject({ service: "seerr", SEERR_URL: "http://new", SEERR_API_KEY: "stored" });
+    const input = probeInputFor(seerr, { values: { SEERR_URL: "http://old/", SEERR_API_KEY: "" }, clear: [] }, config, none);
+    expect(input).toMatchObject({ service: "seerr", SEERR_URL: "http://old/", SEERR_API_KEY: "stored" });
+  });
+
+  it("never sends a stored secret to a new address", () => {
+    const config = loadConfig({}, { SEERR_URL: "http://old", SEERR_API_KEY: "stored" });
+    expect(() =>
+      probeInputFor(seerr, { values: { SEERR_URL: "http://new", SEERR_API_KEY: "" }, clear: [] }, config, none),
+    ).toThrow(expect.objectContaining({ statusCode: 400 }));
+    const reentered = probeInputFor(seerr, { values: { SEERR_URL: "http://new", SEERR_API_KEY: "typed" }, clear: [] }, config, none);
+    expect(reentered).toMatchObject({ SEERR_URL: "http://new", SEERR_API_KEY: "typed" });
+  });
+
+  it("never sends an environment secret to a new address", () => {
+    const env = { SEERR_API_KEY: "from-env" };
+    const config = loadConfig(env, { SEERR_URL: "http://old" });
+    expect(() =>
+      probeInputFor(seerr, { values: { SEERR_URL: "http://new" }, clear: [] }, config, envLockedKeys(env)),
+    ).toThrow(expect.objectContaining({ statusCode: 409 }));
   });
 
   it("drops a secret that is being cleared", () => {

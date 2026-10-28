@@ -34,6 +34,17 @@ private class LiveSession(private val context: Context) : TvInputService.Session
   private var tunedUuid: String? = null
   private var errorView: TextView? = null
   private var errorMessage: String? = null
+  private val heartbeat = object : Runnable {
+    override fun run() {
+      val uuid = tunedUuid ?: return
+      network.execute {
+        val credentials = CredentialStore.load(context) ?: return@execute
+        runCatching { ReclinarrApi(credentials).heartbeat(uuid) }
+          .onFailure { Log.w(TAG, "Heartbeat failed for $uuid", it) }
+      }
+      main.postDelayed(this, HEARTBEAT_MS)
+    }
+  }
 
   // Same live buffering as apps/tv/src/NativeVideoSurface.tsx LIVE_BUFFER_CONFIG.
   private val player = ExoPlayer.Builder(context)
@@ -69,6 +80,7 @@ private class LiveSession(private val context: Context) : TvInputService.Session
 
   override fun onTune(channelUri: Uri): Boolean {
     val generation = ++tuneGeneration
+    main.removeCallbacks(heartbeat)
     player.stop()
     showError(null)
     notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING)
@@ -97,6 +109,7 @@ private class LiveSession(private val context: Context) : TvInputService.Session
             )
             player.prepare()
             player.playWhenReady = true
+            main.postDelayed(heartbeat, HEARTBEAT_MS)
           }
           .onFailure { e ->
             Log.e(TAG, "Tune failed for $channelUri", e)
@@ -130,6 +143,7 @@ private class LiveSession(private val context: Context) : TvInputService.Session
 
   override fun onRelease() {
     tuneGeneration++
+    main.removeCallbacks(heartbeat)
     player.release()
     val uuid = tunedUuid
     if (uuid != null) {
@@ -173,5 +187,7 @@ private class LiveSession(private val context: Context) : TvInputService.Session
     const val SIGN_IN_ERROR = "Open Reclinarr and sign in again"
     const val STREAM_START_TIMEOUT_MS = 60_000
     const val CONNECT_TIMEOUT_MS = 15_000
+    // Server reaps live viewers silent for 2 min.
+    const val HEARTBEAT_MS = 30_000L
   }
 }

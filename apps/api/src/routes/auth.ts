@@ -4,6 +4,7 @@ import type { AppContext } from "../context.js";
 import { sessionCookieSecure } from "../config.js";
 import { isDemoSession, requireAuth } from "../plugins/auth.js";
 import { SESSION_COOKIE } from "../services/session.js";
+import { releaseLivePlayback } from "../services/live-playback.js";
 import { JellyfinProvider, MockJellyfinProvider } from "@reclinarr/providers";
 import { createHash } from "node:crypto";
 
@@ -93,7 +94,10 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
   );
 
   app.post("/api/auth/logout", async (req, reply) => {
-    if (req.session) await ctx.sessions.destroy(req.session.id);
+    if (req.session) {
+      releaseLivePlayback(ctx, req.session.id);
+      await ctx.sessions.destroy(req.session.id);
+    }
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { ok: true };
   });

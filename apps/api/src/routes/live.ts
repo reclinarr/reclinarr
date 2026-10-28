@@ -6,6 +6,8 @@ import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
 import { releaseLivePlayback } from "../services/live-playback.js";
 
+const MAX_GUIDE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/live/groups", async (req) => {
     await requireAuth(req);
@@ -68,12 +70,20 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
     await requireAuth(req);
     const query = z
       .object({
-        start: z.string().min(1).optional(),
-        end: z.string().min(1).optional(),
+        start: z.string().datetime({ offset: true }).optional(),
+        end: z.string().datetime({ offset: true }).optional(),
       })
       .parse(req.query);
     const start = query.start ?? new Date(Date.now() - 30 * 60_000).toISOString();
     const end = query.end ?? new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    // Dispatcharr returns every programme in the window and the grid is buffered whole:
+    // a caller-chosen span of weeks is hundreds of thousands of rows.
+    const span = Date.parse(end) - Date.parse(start);
+    if (!(span > 0) || span > MAX_GUIDE_WINDOW_MS) {
+      const err = new Error("Guide window must be positive and at most 24 hours") as Error & { statusCode: number };
+      err.statusCode = 400;
+      throw err;
+    }
     const items = await ctx.dispatcharr.getGuideWindow({ start, end });
     return { items, start, end };
   });
@@ -92,6 +102,13 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
     return { ok: true as const };
   });
 
+  /** Players call this every ~30s while a live channel is on screen; silent viewers are reaped. */
+  app.post("/api/live/heartbeat", async (req) => {
+    const { session } = await requireAuth(req);
+    const body = z.object({ uuid: z.string().uuid() }).parse(req.body ?? {});
+    return { ok: ctx.liveHls.heartbeat(session.id, body.uuid) };
+  });
+
   app.post("/api/live/play/:uuid", async (req) => {
     const { session } = await requireAuth(req);
     const { uuid } = z.object({ uuid: z.string().uuid() }).parse(req.params);
@@ -103,11 +120,18 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
       .default({})
       .parse(req.body ?? {});
 
+    // Unknown channels must not register a viewer: the viewer gates the IPTV hold.
+    const channel = await ctx.dispatcharr.getChannel(uuid);
+    if (!channel) {
+      const err = new Error("Channel not found") as Error & { statusCode: number };
+      err.statusCode = 404;
+      throw err;
+    }
+
     // Drop any prior live tune before opening — max IPTV connections is often 1.
     releaseLivePlayback(ctx, session.id);
     ctx.liveHls.registerViewer(session.id, uuid);
 
-    const channel = (await ctx.dispatcharr.getChannel?.(uuid)) ?? null;
     const ua = String(req.headers["user-agent"] ?? "");
     // Body flag from the app, or auto-detect Apple clients that cannot play MPEG-TS.
     const wantHls =

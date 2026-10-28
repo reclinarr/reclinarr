@@ -83,14 +83,25 @@ describe("admin service routes", () => {
       method: "PUT",
       url: "/api/admin/services/seerr",
       headers,
-      payload: { values: { SEERR_URL: "http://new-seerr:5055", SEERR_API_KEY: "" } },
+      payload: { values: { SEERR_URL: "http://seerr:5055/", SEERR_API_KEY: "" } },
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8"))).toEqual({
-      SEERR_URL: "http://new-seerr:5055",
+      SEERR_URL: "http://seerr:5055",
       SEERR_API_KEY: "s3cret",
     });
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  });
+
+  it("refuses to point the stored secret at a new address", async () => {
+    const { app, headers, dir, onSaved } = await start(true);
+    for (const [method, url] of [["PUT", "/api/admin/services/seerr"], ["POST", "/api/admin/services/seerr/test"]] as const) {
+      const res = await app.inject({ method, url, headers, payload: { values: { SEERR_URL: "http://attacker.example", SEERR_API_KEY: "" } } });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/re-enter/i);
+    }
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).SEERR_URL).toBe("http://seerr:5055");
+    expect(onSaved).not.toHaveBeenCalled();
   });
 
   it("rejects invalid input and unknown services", async () => {

@@ -10,7 +10,7 @@ import {
 } from "@reclinarr/shared";
 import { DispatcharrProvider, JellyfinProvider } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
-import { requireAuth } from "../plugins/auth.js";
+import { isDemoSession, requireAuth, requireFullAccess } from "../plugins/auth.js";
 import { IptvProgressStore } from "../services/iptv-progress.js";
 import { hlsDir, hlsPlaybackReady } from "../services/hls-paths.js";
 import { liveHlsReady } from "../services/live-hls.js";
@@ -57,6 +57,7 @@ export async function registerPlaybackRoutes(
       preferredAudioLanguage: body.preferredAudioLanguage,
       maxStreamingBitrate: body.maxStreamingBitrate,
       deviceProfile: body.deviceProfile,
+      libraryOnly: isDemoSession(ctx, session),
     });
     if (!result) {
       const err = new Error("No playable source") as Error & { statusCode: number };
@@ -261,8 +262,10 @@ export async function registerPlaybackRoutes(
     });
 
     // HLS master playlist stays in the API (rewrite segment URLs); media bytes go via nginx.
-    // Progressive Transcode (stream.mp4 / http) is NOT a playlist — only .m3u8 is.
-    const looksLikePlaylist = query.transcodingPath?.includes(".m3u8") ?? false;
+    // Progressive Transcode (stream.mp4 / http) is NOT a playlist — only .m3u8 is. transcodingPath
+    // is ignored unless playMethod=Transcode, and only its path (not query) names a playlist.
+    const looksLikePlaylist =
+      query.playMethod === "Transcode" && isPlaylistPath(query.transcodingPath ?? "");
 
     if (nginxPlane && !looksLikePlaylist) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
@@ -285,13 +288,8 @@ export async function registerPlaybackRoutes(
     });
 
     const ct = upstream.headers.get("content-type") ?? "";
-    const isPlaylist =
-      ct.includes("mpegurl") ||
-      ct.includes("m3u8") ||
-      (query.transcodingPath?.includes(".m3u8") ?? false);
-
-    if (isPlaylist) {
-      const text = await upstream.text();
+    if (isPlaylistContentType(ct)) {
+      const text = await readPlaylistText(upstream, abort);
       const rewritten = rewriteHlsPlaylist(text, {
         ...query,
         sessionId: req.session?.id,
@@ -373,13 +371,13 @@ export async function registerPlaybackRoutes(
   };
 
   app.get("/api/playback/cache/:id/hls/index.m3u8", async (req, reply) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     return sendCacheHls(req, reply, id, "index.m3u8");
   });
 
   app.get("/api/playback/cache/:id/hls/:segment", async (req, reply) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const params = z
       .object({
         id: z.string().uuid(),
@@ -391,7 +389,7 @@ export async function registerPlaybackRoutes(
 
   /** Legacy cache URL → HLS playlist (bookmarks / old clients). */
   app.get("/api/playback/cache/:id", async (req, reply) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     if (!hlsPlaybackReady(ctx.config.RECLINARR_DATA_DIR, id)) {
       return reply.status(404).send({ error: "Cache HLS not ready" });
@@ -406,7 +404,7 @@ export async function registerPlaybackRoutes(
   app.get("/api/playback/dispatcharr/live/:uuid", async (req, reply) => {
     const { session } = await requireAuth(req);
     const params = z.object({ uuid: z.string().uuid() }).parse(req.params);
-    if (!ctx.liveHls.hasViewer(session.id, params.uuid)) {
+    if (!ctx.liveHls.heartbeat(session.id, params.uuid)) {
       return reply.status(409).send({ error: "Channel is no longer selected" });
     }
 
@@ -469,7 +467,8 @@ export async function registerPlaybackRoutes(
   app.get("/api/playback/dispatcharr/live/:uuid/hls/index.m3u8", async (req, reply) => {
     const { session } = await requireAuth(req);
     const { uuid } = z.object({ uuid: z.string().uuid() }).parse(req.params);
-    if (!ctx.liveHls.hasViewer(session.id, uuid)) {
+    // hls.js / AVPlayer poll the playlist every few seconds, which doubles as the viewer heartbeat.
+    if (!ctx.liveHls.heartbeat(session.id, uuid)) {
       return reply.status(409).send({ error: "Channel is no longer selected" });
     }
 
@@ -533,7 +532,7 @@ export async function registerPlaybackRoutes(
    * Debug / raw Dispatcharr VOD proxy (no remux). Normal Play uses auto-cache + HLS.
    */
   app.get("/api/playback/dispatcharr/vod/:uuid", async (req, reply) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const params = z.object({ uuid: z.string().uuid() }).parse(req.params);
     const query = z
       .object({
@@ -677,8 +676,7 @@ export async function registerPlaybackRoutes(
       jellyfinPath: path.startsWith("/") ? path : `/${path}`,
     });
 
-    const isPlaylist = path.includes(".m3u8");
-    if (nginxPlane && !isPlaylist) {
+    if (nginxPlane && !isPlaylistPath(path)) {
       return sendAccelRedirect(reply, upstreamAccelPath("jellyfin", target.url.toString()), {
         buffering: false,
       });
@@ -696,8 +694,8 @@ export async function registerPlaybackRoutes(
     });
 
     const ct = upstream.headers.get("content-type") ?? "";
-    if (ct.includes("mpegurl") || path.includes(".m3u8")) {
-      const text = await upstream.text();
+    if (isPlaylistContentType(ct)) {
+      const text = await readPlaylistText(upstream, abort);
       const rewritten = rewriteHlsPlaylist(text, {
         path,
         sessionId: req.session?.id,
@@ -724,6 +722,44 @@ export async function registerPlaybackRoutes(
     }
     return reply.send(upstream.body);
   });
+}
+
+/** A Jellyfin path names an HLS playlist only by its path; a ".m3u8" in the query must not count. */
+export function isPlaylistPath(pathAndQuery: string): boolean {
+  return pathAndQuery.split(/[?#]/, 1)[0]!.toLowerCase().endsWith(".m3u8");
+}
+
+function isPlaylistContentType(contentType: string): boolean {
+  const ct = contentType.toLowerCase();
+  return ct.includes("mpegurl") || ct.includes("m3u8");
+}
+
+/** Real HLS playlists are a few KB; anything this large is media mislabelled as a playlist. */
+export const MAX_PLAYLIST_BYTES = 5 * 1024 * 1024;
+
+/** Reads a playlist body into memory, refusing (and aborting the upstream) past MAX_PLAYLIST_BYTES. */
+export async function readPlaylistText(upstream: Response, abort: AbortController): Promise<string> {
+  const declared = Number(upstream.headers.get("content-length") ?? "");
+  const tooLarge = () => {
+    abort.abort();
+    return Object.assign(new Error("Upstream playlist is too large"), { statusCode: 502 });
+  };
+  if (Number.isFinite(declared) && declared > MAX_PLAYLIST_BYTES) throw tooLarge();
+  if (!upstream.body) return "";
+  const reader = upstream.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_PLAYLIST_BYTES) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function sendBazarrSubtitle(

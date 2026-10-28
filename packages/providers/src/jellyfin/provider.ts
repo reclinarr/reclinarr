@@ -118,6 +118,21 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
     return data.Policy?.IsAdministrator === true;
   }
 
+  /** False once Jellyfin stops accepting this token: revoked device, deleted or disabled user. */
+  async isTokenValid(ctx: UserContext): Promise<boolean> {
+    try {
+      const { data } = await this.httpFor(ctx).request(
+        "GET",
+        `/Users/${encodeURIComponent(ctx.jellyfinUserId)}`,
+        { schema: JellyfinUserPolicySchema },
+      );
+      return data.Policy?.IsDisabled !== true;
+    } catch (err) {
+      if (err instanceof ProviderError && [401, 403, 404].includes(err.statusCode ?? 0)) return false;
+      throw err;
+    }
+  }
+
   async health(): Promise<ProviderHealth> {
     const started = Date.now();
     try {
@@ -874,14 +889,20 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
         statusCode: 400,
       });
     }
-    if (!opts?.allowApiPaths && !isJellyfinMediaPath(path)) {
+    // Judge the URL that will actually be fetched: the WHATWG parser drops fragments and resolves
+    // percent-encoded dot segments, so checks on the raw string can be steered off media paths.
+    const url = new URL(`${this.baseUrl}${path}`);
+    const basePath = new URL(this.baseUrl).pathname.replace(/\/+$/, "");
+    const underBase = url.pathname.startsWith(`${basePath}/`);
+    const relative = `${url.pathname.slice(basePath.length)}${url.search}`;
+    if (!underBase || (!opts?.allowApiPaths && !isJellyfinMediaPath(relative))) {
       throw new ProviderError("Jellyfin path is not a media stream path", {
         code: "unavailable",
         provider: "jellyfin",
         statusCode: 400,
       });
     }
-    return new URL(`${this.baseUrl}${path}`);
+    return url;
   }
 
   /** Text subtitle (SRT/VTT/ASS) as WebVTT. Bitmap subs such as PGS are not supported. */
@@ -1338,7 +1359,8 @@ export function normalizeJellyfinRelativePath(
   baseUrl: string,
 ): string | null {
   const trimmed = raw.trim();
-  if (!trimmed || trimmed.includes("..")) return null;
+  // Fragments never reach the server; one here only hides the real path from the checks below.
+  if (!trimmed || trimmed.includes("..") || trimmed.includes("#")) return null;
 
   let pathAndQuery: string;
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

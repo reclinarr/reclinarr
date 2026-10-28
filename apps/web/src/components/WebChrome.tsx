@@ -212,15 +212,17 @@ export function WebChrome({
             {menuOpen ? (
               <View style={styles.menu}>
                 {username ? <Text style={styles.menuName}>{username}</Text> : null}
-                <Pressable
-                  style={styles.menuItem}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    navigation.navigate("Downloads");
-                  }}
-                >
-                  <Text style={styles.menuText}>Cache</Text>
-                </Pressable>
+                {demo ? null : (
+                  <Pressable
+                    style={styles.menuItem}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      navigation.navigate("Downloads");
+                    }}
+                  >
+                    <Text style={styles.menuText}>Cache</Text>
+                  </Pressable>
+                )}
                 {demo ? null : (
                   <Pressable
                     style={styles.menuItem}

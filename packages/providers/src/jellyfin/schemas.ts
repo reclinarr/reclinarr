@@ -9,7 +9,10 @@ export const JellyfinUserSchema = z
 
 export const JellyfinUserPolicySchema = z
   .object({
-    Policy: z.object({ IsAdministrator: z.boolean().optional() }).passthrough().optional(),
+    Policy: z
+      .object({ IsAdministrator: z.boolean().optional(), IsDisabled: z.boolean().optional() })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
