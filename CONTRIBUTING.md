@@ -109,7 +109,7 @@ Web e2e uses `RECLINARR_TEST_USERNAME` / `RECLINARR_TEST_PASSWORD` (and optional
 
 ## Releasing
 
-Maintainers: `make release VERSION=0.2.0` bumps every package and Expo app to one version and commits it. After that merges to `main`, `git tag v0.2.0 && git push origin v0.2.0` makes CI publish `0.2.0`, `0.2` and `latest` to GHCR and Docker Hub (the tag must match the package version). Pushes to `main` publish `edge`.
+Maintainers: `make release VERSION=0.2.0` bumps every package and Expo app to one version and commits it. After that merges to `main`, `git tag v0.2.0 && git push origin v0.2.0` makes CI publish `0.2.0`, `0.2` and `latest` to GHCR and Docker Hub (the tag must match the package version), then creates the GitHub Release with generated notes (`-rc` style tags are marked prerelease). Pushes to `main` publish `edge`.
 
 ## Reporting issues
 
