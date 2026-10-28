@@ -25,15 +25,23 @@ Logo source files are in [`assets/branding`](./assets/branding).
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/01-home.png" alt="Home — hero and Continue Watching" width="900" />
+  <img src="assets/screenshots/01-home.png" alt="Home — billboard, recently added and trending rows" width="900" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/04-movies.png" alt="Movies — library grid" width="900" />
+  <img src="assets/screenshots/04-movies.png" alt="Movies — featured title and library" width="900" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/02-details.png" alt="Series details — seasons and episodes" width="900" />
+  <img src="assets/screenshots/02-details.png" alt="Series details — cast, seasons and episodes" width="900" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/03-search.png" alt="Search — quick results over trending and popular titles" width="900" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/05-player.png" alt="Player — web playback controls" width="900" />
 </p>
 
 ## Current status
