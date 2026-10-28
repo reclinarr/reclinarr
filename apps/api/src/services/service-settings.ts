@@ -114,6 +114,7 @@ export function describeServices(config: AppConfig, env: NodeJS.ProcessEnv): Ser
 function normalizeServiceUrl(value: string, ctx: z.RefinementCtx): string {
   let url: URL | undefined;
   try {
+    // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
     url = /[\s\u0000-\u001f\u007f]/.test(value) ? undefined : new URL(value);
   } catch {
     url = undefined;

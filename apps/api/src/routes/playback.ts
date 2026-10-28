@@ -417,51 +417,50 @@ export async function registerPlaybackRoutes(
       return reply.send("Mock live stream — configure DISPATCHARR auth for real playback.");
     }
 
-    try {
-      if (dispatcharrAccel) {
-        // API returns 204 immediately; nginx keeps Dispatcharr open. Hold the live
-        // slot until another channel is tuned (see holdLive).
-        ctx.iptvConnections.holdLive(params.uuid);
-        const target = await ctx.dispatcharr.resolveLiveStreamTarget({ uuid: params.uuid });
-        return sendAccelRedirect(reply, upstreamAccelPath("dispatcharr", target.url), {
-          contentType: "video/mp2t",
-          buffering: false,
-        });
-      }
-
-      const lease = ctx.iptvConnections.acquire("live", { label: `live:${params.uuid}` });
-      const cleanup = () => lease.release();
-      reply.raw.on("close", cleanup);
-
-      const upstream = await ctx.dispatcharr.openLiveStream({
-        uuid: params.uuid,
-        signal: lease.signal,
+    if (dispatcharrAccel) {
+      // API returns 204 immediately; nginx keeps Dispatcharr open. Hold the live
+      // slot until another channel is tuned (see holdLive).
+      ctx.iptvConnections.holdLive(params.uuid);
+      const target = await ctx.dispatcharr.resolveLiveStreamTarget({ uuid: params.uuid });
+      return sendAccelRedirect(reply, upstreamAccelPath("dispatcharr", target.url), {
+        contentType: "video/mp2t",
+        buffering: false,
       });
-      if (!upstream.ok) {
-        cleanup();
-        const errText = await upstream.text().catch(() => "");
-        return reply.status(upstream.status).send({
-          error:
-            formatIptvUpstreamError(upstream.status, errText) ??
-            (errText || `Dispatcharr live stream failed (${upstream.status})`),
-        });
-      }
-
-      reply.status(upstream.status);
-      reply.header("Content-Type", upstream.headers.get("content-type") ?? "video/mp2t");
-      reply.header("Cache-Control", "no-store, no-transform");
-      reply.header("X-Accel-Buffering", "no");
-      if (!upstream.body) {
-        cleanup();
-        return reply.send(Buffer.from(await upstream.arrayBuffer()));
-      }
-      // Do not cancel() the body on lease abort — once reply.send() pipes it the
-      // stream is locked and cancel() crashes the process (ERR_INVALID_STATE).
-      // Aborting lease.signal cancels the upstream fetch instead.
-      return reply.send(upstream.body);
-    } catch (err) {
-      throw err;
     }
+
+    const lease = ctx.iptvConnections.acquire("live", { label: `live:${params.uuid}` });
+    const cleanup = () => lease.release();
+    reply.raw.on("close", cleanup);
+
+    const upstream = await ctx.dispatcharr.openLiveStream({
+      uuid: params.uuid,
+      signal: lease.signal,
+    });
+    if (!upstream.ok) {
+      cleanup();
+      const errText = await upstream.text().catch(() => "");
+      return reply.status(upstream.status).send({
+        error:
+          formatIptvUpstreamError(upstream.status, errText) ??
+          (errText || `Dispatcharr live stream failed (${upstream.status})`),
+      });
+    }
+
+    reply.status(upstream.status);
+    sandboxProxiedContent(reply).header(
+      "Content-Type",
+      safeProxiedContentType(upstream.headers.get("content-type") ?? "video/mp2t", "media"),
+    );
+    reply.header("Cache-Control", "no-store, no-transform");
+    reply.header("X-Accel-Buffering", "no");
+    if (!upstream.body) {
+      cleanup();
+      return reply.send(Buffer.from(await upstream.arrayBuffer()));
+    }
+    // Do not cancel() the body on lease abort — once reply.send() pipes it the
+    // stream is locked and cancel() crashes the process (ERR_INVALID_STATE).
+    // Aborting lease.signal cancels the upstream fetch instead.
+    return reply.send(upstream.body);
   });
 
   /**
@@ -565,44 +564,40 @@ export async function registerPlaybackRoutes(
       });
     }
 
-    try {
-      // Always streamed by the API, never handed to nginx: an X-Accel hand-off gives no
-      // disconnect signal, so its IPTV lease could never be released.
-      const lease = ctx.iptvConnections.acquire("playback", {
-        label: `vod:${params.uuid}`,
+    // Always streamed by the API, never handed to nginx: an X-Accel hand-off gives no
+    // disconnect signal, so its IPTV lease could never be released.
+    const lease = ctx.iptvConnections.acquire("playback", {
+      label: `vod:${params.uuid}`,
+    });
+    const cleanup = () => lease.release();
+    reply.raw.on("close", cleanup);
+
+    const upstream = await ctx.dispatcharr.openVodStream({
+      uuid: params.uuid,
+      kind: query.kind,
+      streamId: query.streamId,
+      signal: lease.signal,
+    });
+
+    if (!upstream.ok) {
+      cleanup();
+      const errText = await upstream.text().catch(() => "");
+      return reply.status(upstream.status).send({
+        error:
+          formatIptvUpstreamError(upstream.status, errText) ??
+          (errText || `Dispatcharr stream failed (${upstream.status})`),
       });
-      const cleanup = () => lease.release();
-      reply.raw.on("close", cleanup);
-
-      const upstream = await ctx.dispatcharr.openVodStream({
-        uuid: params.uuid,
-        kind: query.kind,
-        streamId: query.streamId,
-        signal: lease.signal,
-      });
-
-      if (!upstream.ok) {
-        cleanup();
-        const errText = await upstream.text().catch(() => "");
-        return reply.status(upstream.status).send({
-          error:
-            formatIptvUpstreamError(upstream.status, errText) ??
-            (errText || `Dispatcharr stream failed (${upstream.status})`),
-        });
-      }
-
-      reply.status(upstream.status);
-      reply.header("Cache-Control", "no-store");
-      const ct = upstream.headers.get("content-type");
-      sandboxProxiedContent(reply).header("Content-Type", safeProxiedContentType(ct, "media"));
-      if (!upstream.body) {
-        cleanup();
-        return reply.send(Buffer.from(await upstream.arrayBuffer()));
-      }
-      return reply.send(upstream.body);
-    } catch (err) {
-      throw err;
     }
+
+    reply.status(upstream.status);
+    reply.header("Cache-Control", "no-store");
+    const ct = upstream.headers.get("content-type");
+    sandboxProxiedContent(reply).header("Content-Type", safeProxiedContentType(ct, "media"));
+    if (!upstream.body) {
+      cleanup();
+      return reply.send(Buffer.from(await upstream.arrayBuffer()));
+    }
+    return reply.send(upstream.body);
   });
 
   /** Text subtitles Jellyfin already indexed (including Bazarr sidecars). */

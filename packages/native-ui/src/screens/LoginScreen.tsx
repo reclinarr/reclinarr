@@ -63,7 +63,7 @@ export function LoginScreen({
       try {
         getClient();
       } catch (err) {
-        throw new Error((err as Error).message);
+        throw new Error((err as Error).message, { cause: err });
       }
       if (!username.trim() || !password) {
         throw new Error("Enter your Jellyfin username and password");
@@ -77,12 +77,12 @@ export function LoginScreen({
           deviceName,
         });
       } catch (err) {
-        throw new Error(`Sign-in failed (${where}): ${(err as Error).message}`);
+        throw new Error(`Sign-in failed (${where}): ${(err as Error).message}`, { cause: err });
       }
       try {
         return await me();
       } catch (err) {
-        throw new Error(`Signed in but session check failed (${where}): ${(err as Error).message}`);
+        throw new Error(`Signed in but session check failed (${where}): ${(err as Error).message}`, { cause: err });
       }
     },
     onSuccess: async (session) => {

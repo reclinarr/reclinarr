@@ -13,6 +13,7 @@ export interface LibraryNamingMeta {
 /** Strip characters that break filesystem / Jellyfin folder scanners. */
 export function sanitizeLibraryName(raw: string, fallback = "Unknown"): string {
   const cleaned = raw
+    // eslint-disable-next-line no-control-regex -- stripping control characters is the point
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
     .replace(/\s+/g, " ")
     .trim()

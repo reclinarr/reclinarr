@@ -10,8 +10,7 @@
     "start": "node dist/server.js",
     "start:packager": "node dist/packager.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "lint": "echo 'no lint configured'"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

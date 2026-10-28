@@ -5,7 +5,6 @@ import {
   attachClient as attach,
   clearSession as clear,
   loadServerUrl as load,
-  probeServer,
   saveServerUrl as save,
   SESSION_KEY,
 } from "@reclinarr/native-ui";

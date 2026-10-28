@@ -336,7 +336,7 @@ export class PlaybackResolver {
       this.dispatcharr.listEpisodesForSeries
     ) {
       const preferredLanguages = this.iptvPreferredLanguages(preferredAudioLanguage);
-      let seriesId =
+      const seriesId =
         this.db != null
           ? lookupDispatcharrIndex(this.db, identity.tmdbId, "tv", preferredLanguages)
               ?.dispatcharrId

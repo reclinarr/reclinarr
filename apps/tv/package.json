@@ -9,8 +9,7 @@
     "prebuild": "EXPO_TV=1 expo prebuild --clean",
     "prebuild:tv": "EXPO_TV=1 expo prebuild --clean",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'no tests'",
-    "lint": "echo 'no lint configured'"
+    "test": "echo 'no tests'"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

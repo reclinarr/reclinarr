@@ -164,9 +164,8 @@ export interface LiveTvProvider extends MediaProvider {
   resolveLivePlayback(channelUuid: string): Promise<PlaybackSource | null>;
 }
 
-export interface AcquisitionSourceProvider extends MediaProvider {
-  // Phase 5 — resolve AcquisitionSource from identity
-}
+// Phase 5 — resolve AcquisitionSource from identity
+export type AcquisitionSourceProvider = MediaProvider;
 
 export interface UserContext {
   jellyfinUserId: string;

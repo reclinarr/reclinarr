@@ -15,8 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
-    "lint": "echo 'no lint configured'"
+    "test": "vitest run"
   },
   "dependencies": {
     "zod": "^4.6.6"

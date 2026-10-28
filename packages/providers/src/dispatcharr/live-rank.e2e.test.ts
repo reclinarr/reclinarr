@@ -61,7 +61,6 @@ describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
     const langs = da!.candidates.map((c) => c.catalogueLanguage);
     const labels = da!.candidates.map((c) => c.label);
 
-    // eslint-disable-next-line no-console
     console.log(
       JSON.stringify(
         {
@@ -102,7 +101,6 @@ describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
     expect(da?.candidates?.length).toBeGreaterThan(0);
     const top = da!.candidates[0]!;
 
-    // eslint-disable-next-line no-console
     console.log(
       JSON.stringify(
         {
@@ -165,7 +163,6 @@ describe.skipIf(!live)("live Dispatcharr stream ranking (e2e)", () => {
       ).toBe(true);
     }
 
-    // eslint-disable-next-line no-console
     console.log(
       JSON.stringify(
         {

@@ -15,8 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:live": "RECLINARR_LIVE_TESTS=true vitest run src/dispatcharr/live-rank.e2e.test.ts",
-    "lint": "echo 'no lint configured'"
+    "test:live": "RECLINARR_LIVE_TESTS=true vitest run src/dispatcharr/live-rank.e2e.test.ts"
   },
   "dependencies": {
     "@reclinarr/shared": "*",

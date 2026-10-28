@@ -36,6 +36,7 @@ jobs:
       # API and web import the libraries' dist/, so they must exist before typecheck.
       - run: make libs
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
       - name: Production build (API + web)
         run: |

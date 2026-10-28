@@ -146,7 +146,7 @@ export function NativeVideoSurface(props: VideoSurfaceProps) {
         const code = err?.errorCode ?? err?.code;
         // Native ExoPlayer already seekToDefaultPosition + prepare for this.
         if (isBehindLiveWindowError(detail, code)) return;
-        let where = "";
+        let where: string;
         try {
           const u = new URL(props.uri);
           where = `${u.host}${u.pathname}`;
