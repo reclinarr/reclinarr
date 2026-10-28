@@ -19,7 +19,7 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "typescript": "^5.8.2",
