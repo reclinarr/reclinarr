@@ -51,7 +51,7 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
 
   app.post("/api/live/favourites/:uuid/toggle", async (req) => {
     const { session } = await requireAuth(req);
-    const { uuid } = z.object({ uuid: z.string().uuid() }).parse(req.params);
+    const { uuid } = z.object({ uuid: z.guid() }).parse(req.params);
     return ctx.liveFavourites.toggle(session.jellyfinUserId, uuid);
   });
 
@@ -59,7 +59,7 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
     await requireAuth(req);
     const body = z
       .object({
-        channelUuids: z.array(z.string().uuid()).max(80),
+        channelUuids: z.array(z.guid()).max(80),
       })
       .parse(req.body);
     const items = await ctx.dispatcharr.getNowNext(body.channelUuids);
@@ -95,7 +95,7 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
   app.post("/api/live/stop", async (req) => {
     const { session } = await requireAuth(req);
     const body = z
-      .object({ uuid: z.string().uuid().optional() })
+      .object({ uuid: z.guid().optional() })
       .default({})
       .parse(req.body ?? {});
     releaseLivePlayback(ctx, session.id, body.uuid);
@@ -105,13 +105,13 @@ export async function registerLiveRoutes(app: FastifyInstance, ctx: AppContext):
   /** Players call this every ~30s while a live channel is on screen; silent viewers are reaped. */
   app.post("/api/live/heartbeat", async (req) => {
     const { session } = await requireAuth(req);
-    const body = z.object({ uuid: z.string().uuid() }).parse(req.body ?? {});
+    const body = z.object({ uuid: z.guid() }).parse(req.body ?? {});
     return { ok: ctx.liveHls.heartbeat(session.id, body.uuid) };
   });
 
   app.post("/api/live/play/:uuid", async (req) => {
     const { session } = await requireAuth(req);
-    const { uuid } = z.object({ uuid: z.string().uuid() }).parse(req.params);
+    const { uuid } = z.object({ uuid: z.guid() }).parse(req.params);
     const body = z
       .object({
         /** Remux MPEG-TS → HLS for AVPlayer (iOS) and web (mpegts.js A/V drift). */

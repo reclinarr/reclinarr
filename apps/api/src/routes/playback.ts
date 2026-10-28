@@ -372,7 +372,7 @@ export async function registerPlaybackRoutes(
 
   app.get("/api/playback/cache/:id/hls/index.m3u8", async (req, reply) => {
     await requireFullAccess(ctx, req);
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { id } = z.object({ id: z.guid() }).parse(req.params);
     return sendCacheHls(req, reply, id, "index.m3u8");
   });
 
@@ -380,7 +380,7 @@ export async function registerPlaybackRoutes(
     await requireFullAccess(ctx, req);
     const params = z
       .object({
-        id: z.string().uuid(),
+        id: z.guid(),
         segment: z.string().min(1).regex(/^[\w.-]+$/),
       })
       .parse(req.params);
@@ -390,7 +390,7 @@ export async function registerPlaybackRoutes(
   /** Legacy cache URL → HLS playlist (bookmarks / old clients). */
   app.get("/api/playback/cache/:id", async (req, reply) => {
     await requireFullAccess(ctx, req);
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { id } = z.object({ id: z.guid() }).parse(req.params);
     if (!hlsPlaybackReady(ctx.config.RECLINARR_DATA_DIR, id)) {
       return reply.status(404).send({ error: "Cache HLS not ready" });
     }
@@ -403,7 +403,7 @@ export async function registerPlaybackRoutes(
    */
   app.get("/api/playback/dispatcharr/live/:uuid", async (req, reply) => {
     const { session } = await requireAuth(req);
-    const params = z.object({ uuid: z.string().uuid() }).parse(req.params);
+    const params = z.object({ uuid: z.guid() }).parse(req.params);
     if (!ctx.liveHls.heartbeat(session.id, params.uuid)) {
       return reply.status(409).send({ error: "Channel is no longer selected" });
     }
@@ -466,7 +466,7 @@ export async function registerPlaybackRoutes(
    */
   app.get("/api/playback/dispatcharr/live/:uuid/hls/index.m3u8", async (req, reply) => {
     const { session } = await requireAuth(req);
-    const { uuid } = z.object({ uuid: z.string().uuid() }).parse(req.params);
+    const { uuid } = z.object({ uuid: z.guid() }).parse(req.params);
     // hls.js / AVPlayer poll the playlist every few seconds, which doubles as the viewer heartbeat.
     if (!ctx.liveHls.heartbeat(session.id, uuid)) {
       return reply.status(409).send({ error: "Channel is no longer selected" });
@@ -510,7 +510,7 @@ export async function registerPlaybackRoutes(
     await requireAuth(req);
     const params = z
       .object({
-        uuid: z.string().uuid(),
+        uuid: z.guid(),
         segment: z.string().min(1).regex(/^[\w.-]+$/),
       })
       .parse(req.params);
@@ -533,7 +533,7 @@ export async function registerPlaybackRoutes(
    */
   app.get("/api/playback/dispatcharr/vod/:uuid", async (req, reply) => {
     await requireFullAccess(ctx, req);
-    const params = z.object({ uuid: z.string().uuid() }).parse(req.params);
+    const params = z.object({ uuid: z.guid() }).parse(req.params);
     const query = z
       .object({
         kind: z.enum(["movie", "episode"]).default("movie"),

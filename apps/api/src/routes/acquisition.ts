@@ -24,7 +24,7 @@ export async function registerAcquisitionRoutes(
 
   app.get("/api/acquisitions/:id", async (req) => {
     await requireFullAccess(ctx, req);
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { id } = z.object({ id: z.guid() }).parse(req.params);
     const item = ctx.acquisitions.get(id);
     if (!item) {
       const err = new Error("Not found") as Error & { statusCode: number };
@@ -45,7 +45,7 @@ export async function registerAcquisitionRoutes(
           provider: z.literal("dispatcharr"),
           movieId: z.number().optional(),
           episodeId: z.number().optional(),
-          uuid: z.string().uuid(),
+          uuid: z.guid(),
           streamId: z.string().optional(),
           m3uAccountId: z.number().optional(),
         }),
@@ -100,7 +100,7 @@ export async function registerAcquisitionRoutes(
 
   app.post("/api/acquisitions/:id/cancel", async (req) => {
     await requireFullAccess(ctx, req);
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { id } = z.object({ id: z.guid() }).parse(req.params);
     const item = await ctx.acquisitions.cancel(id);
     if (!item) {
       const err = new Error("Not found") as Error & { statusCode: number };
@@ -113,7 +113,7 @@ export async function registerAcquisitionRoutes(
   app.post("/api/acquisitions/:id/promote", async (req) => {
     const { userContext } = await requireFullAccess(ctx, req);
     ctx.lastLibraryUserContext = userContext;
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { id } = z.object({ id: z.guid() }).parse(req.params);
     const item = await ctx.acquisitions.promoteToLibrary(id);
     if (!item) {
       const err = new Error("Not found or file missing") as Error & { statusCode: number };

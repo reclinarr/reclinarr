@@ -5,7 +5,7 @@ export const PlaybackDeliverySchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("direct"),
     url: z.string(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   }),
   z.object({
     mode: z.literal("proxy"),
