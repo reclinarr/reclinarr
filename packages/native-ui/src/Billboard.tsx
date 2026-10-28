@@ -117,6 +117,7 @@ export function Billboard({
             title: `${media.metadata.title} trailer`,
             src: embedSrc,
             allow: "autoplay; encrypted-media",
+            referrerPolicy: "strict-origin-when-cross-origin",
             style: {
               position: "absolute",
               top: "-10%",
