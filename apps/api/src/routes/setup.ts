@@ -2,14 +2,15 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "../context.js";
+import { ServiceUrlSchema } from "../services/service-settings.js";
 import { probeSetupService } from "../setup-probe.js";
-import { ensureSetupToken, readSetupConfig, writeSetupConfig } from "../setup-store.js";
+import { ensureSetupToken, readSetupConfig, removeSetupToken, writeSetupConfig } from "../setup-store.js";
 
-const optionalUrl = z.string().url().optional().or(z.literal(""));
+const optionalUrl = ServiceUrlSchema.optional().or(z.literal(""));
 
 const SetupSchema = z.object({
   setupCode: z.string().min(1),
-  JELLYFIN_URL: z.string().url(),
+  JELLYFIN_URL: ServiceUrlSchema,
   SEERR_URL: optionalUrl,
   SEERR_API_KEY: z.string().optional(),
   DISPATCHARR_URL: optionalUrl,
@@ -62,8 +63,9 @@ export async function registerSetupRoutes(
   onSaved: () => void,
 ): Promise<void> {
   const setupRequired = !ctx.config.JELLYFIN_URL.trim() && !ctx.config.RECLINARR_USE_MOCKS;
-  const setupCode = ensureSetupToken(ctx.config.RECLINARR_DATA_DIR);
+  const setupCode = setupRequired ? ensureSetupToken(ctx.config.RECLINARR_DATA_DIR) : "";
   if (setupRequired) app.log.warn({ setupCode }, "first-run setup code");
+  else removeSetupToken(ctx.config.RECLINARR_DATA_DIR);
 
   app.get("/api/setup/status", async () => ({ setupRequired }));
 
@@ -91,6 +93,7 @@ export async function registerSetupRoutes(
     }
     const existing = readSetupConfig(ctx.config.RECLINARR_DATA_DIR);
     writeSetupConfig(ctx.config.RECLINARR_DATA_DIR, { ...existing, ...values });
+    removeSetupToken(ctx.config.RECLINARR_DATA_DIR);
     // Reload only once the reply is flushed: it closes this server.
     reply.raw.once("finish", onSaved);
     return reply.send({ saved: true });

@@ -3,6 +3,49 @@ import { ProviderError, classifyHttpStatus, redactSecrets } from "@reclinarr/sha
 
 export type FetchLike = typeof fetch;
 
+const MAX_REDIRECTS = 5;
+/** Headers that carry no credential and still make sense on another host. */
+const PORTABLE_HEADERS = ["accept", "range", "if-range", "user-agent"];
+
+/**
+ * fetch() follows redirects to other hosts with every custom header intact (it only drops
+ * Authorization and cookies), so API keys and Cloudflare Access secrets would reach whatever
+ * host an upstream redirects to. Follow redirects here instead, and send only portable headers
+ * once the request leaves the original origin.
+ */
+export async function fetchFollowingRedirects(
+  fetchImpl: FetchLike,
+  input: string | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  let url = new URL(String(input));
+  const origin = url.origin;
+  let headers = new Headers(init.headers);
+  let method = init.method ?? "GET";
+  let body = init.body;
+  for (let hop = 0; ; hop++) {
+    const res = await fetchImpl(url, { ...init, method, body, headers, redirect: "manual" });
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status >= 400 || !location) return res;
+    if (hop === MAX_REDIRECTS) throw new Error(`Too many redirects from ${origin}`);
+    await res.body?.cancel();
+    url = new URL(location, url);
+    if (url.origin !== origin) {
+      const portable = new Headers();
+      for (const name of PORTABLE_HEADERS) {
+        const value = headers.get(name);
+        if (value !== null) portable.set(name, value);
+      }
+      headers = portable;
+    }
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+      headers.delete("content-type");
+    }
+  }
+}
+
 export type ProviderOperationMetric = {
   service: string;
   durationMs: number;
@@ -84,7 +127,7 @@ export class HttpClient {
     let outcome: "success" | "failure" = "failure";
     let status: number | undefined;
     try {
-      const res = await this.fetchImpl(url, {
+      const res = await fetchFollowingRedirects(this.fetchImpl, url, {
         method,
         headers: {
           Accept: "application/json",

@@ -107,18 +107,32 @@ export function describeServices(config: AppConfig, env: NodeJS.ProcessEnv): Ser
   }));
 }
 
-const urlValue = z.string().trim().refine(
-  (value) => {
-    if (value === "") return true;
-    try {
-      const { protocol } = new URL(value);
-      return protocol === "http:" || protocol === "https:";
-    } catch {
-      return false;
-    }
-  },
-  { message: "Address must start with http:// or https://" },
-);
+/**
+ * A service address as stored in config.json, which the Docker entrypoint also writes into
+ * nginx.conf: http(s) only, one line, no credentials, query or fragment; stored normalized.
+ */
+function normalizeServiceUrl(value: string, ctx: z.RefinementCtx): string {
+  let url: URL | undefined;
+  try {
+    url = /[\s\u0000-\u001f\u007f]/.test(value) ? undefined : new URL(value);
+  } catch {
+    url = undefined;
+  }
+  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    ctx.addIssue({ code: "custom", message: "Address must start with http:// or https://" });
+    return z.NEVER;
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    ctx.addIssue({ code: "custom", message: "Address must not include a username, password, ? or #" });
+    return z.NEVER;
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+export const ServiceUrlSchema = z.string().trim().transform(normalizeServiceUrl);
+
+/** Same as ServiceUrlSchema, but "" clears the address. */
+const urlValue = z.string().trim().transform((value, ctx) => (value === "" ? "" : normalizeServiceUrl(value, ctx)));
 
 export const ServiceEditSchema = z.object({
   /** Blank secrets are left alone; use `clear` to remove one. */

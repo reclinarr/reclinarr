@@ -21,7 +21,7 @@ import {
   ProviderError,
   rankDispatcharrStreamCandidates,
 } from "@reclinarr/shared";
-import { HttpClient } from "../http.js";
+import { fetchFollowingRedirects, HttpClient } from "../http.js";
 import type {
   AcquisitionSourceProvider,
   LiveTvProvider,
@@ -120,6 +120,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   private static readonly TMDB_CACHE_MAX_ENTRIES = 2000;
   private groupsCache?: { at: number; items: LiveChannelGroup[] };
   private channelsCache?: { at: number; items: LiveChannel[] };
+  private nowNextGrid?: { at: number; items: EpgProgramme[] };
 
   constructor(opts: DispatcharrProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -613,22 +614,20 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     const headers: Record<string, string> = { ...target.headers };
     if (input.range) headers.Range = input.range;
 
-    const res = await (this.fetchImpl ?? fetch)(target.url, {
+    const res = await fetchFollowingRedirects(this.fetchImpl ?? fetch, target.url, {
       headers,
       signal: input.signal,
-      redirect: "follow",
     });
 
     if ((res.status === 401 || res.status === 302) && this.auth?.type === "credentials") {
       await this.ensureJwt(true);
       const retried = await this.resolveVodStreamTarget(input);
-      return (this.fetchImpl ?? fetch)(retried.url, {
+      return fetchFollowingRedirects(this.fetchImpl ?? fetch, retried.url, {
         headers: {
           ...retried.headers,
           ...(input.range ? { Range: input.range } : {}),
         },
         signal: input.signal,
-        redirect: "follow",
       });
     }
     return res;
@@ -1139,10 +1138,15 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     uuids: string[],
     byUuid: Map<string, LiveChannel>,
   ): Promise<LiveNowNext[]> {
-    const guide = await this.getGuideWindow({
-      start: new Date(Date.now() - 30 * 60_000).toISOString(),
-      end: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
-    });
+    // Every Live screen polls now/next each minute; one grid fetch per minute serves all of them.
+    if (!this.nowNextGrid || Date.now() - this.nowNextGrid.at > 60_000) {
+      const items = await this.getGuideWindow({
+        start: new Date(Date.now() - 30 * 60_000).toISOString(),
+        end: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+      });
+      this.nowNextGrid = { at: Date.now(), items };
+    }
+    const guide = this.nowNextGrid.items;
     const byTvg = new Map<string, EpgProgramme[]>();
     for (const p of guide) {
       const key = p.channelId;
@@ -1174,29 +1178,40 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   }
 
   async getGuideWindow(opts: { start: string; end: string }): Promise<EpgProgramme[]> {
-    await this.ensureJwt();
-    if (!this.auth) {
-      throw new ProviderError("Dispatcharr auth not configured", {
-        code: "unauthorized",
-        provider: this.id,
+    const fetchGrid = async (refreshToken: boolean) => {
+      await this.ensureJwt(refreshToken);
+      if (!this.auth) {
+        throw new ProviderError("Dispatcharr auth not configured", {
+          code: "unauthorized",
+          provider: this.id,
+        });
+      }
+      // Grid payloads are large — use a longer timeout than catalogue calls.
+      const http = new HttpClient({
+        baseUrl: this.baseUrl,
+        timeoutMs: Math.max(this.timeoutMs, 60_000),
+        serviceName: "dispatcharr",
+        fetchImpl: this.fetchImpl,
+        defaultHeaders: {
+          ...this.gateHeaders(),
+          ...authHeaders(this.auth, this.accessToken),
+        },
       });
+      const { data } = await http.request("GET", "/api/epg/grid/", {
+        query: { start: opts.start, end: opts.end },
+        schema: GridSchema,
+      });
+      return (data.data ?? []).map((p) => this.mapProgram(p));
+    };
+    try {
+      return await fetchGrid(false);
+    } catch (err) {
+      // Same as withAuthRetry: an expired JWT gets one refresh instead of failing the guide.
+      if (err instanceof ProviderError && err.code === "unauthorized" && this.auth?.type === "credentials") {
+        return await fetchGrid(true);
+      }
+      throw err;
     }
-    // Grid payloads are large — use a longer timeout than catalogue calls.
-    const http = new HttpClient({
-      baseUrl: this.baseUrl,
-      timeoutMs: Math.max(this.timeoutMs, 60_000),
-      serviceName: "dispatcharr",
-      fetchImpl: this.fetchImpl,
-      defaultHeaders: {
-        ...this.gateHeaders(),
-        ...authHeaders(this.auth, this.accessToken),
-      },
-    });
-    const { data } = await http.request("GET", "/api/epg/grid/", {
-      query: { start: opts.start, end: opts.end },
-      schema: GridSchema,
-    });
-    return (data.data ?? []).map((p) => this.mapProgram(p));
   }
 
   async resolveLivePlayback(channelUuid: string): Promise<PlaybackSource | null> {
@@ -1249,19 +1264,17 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     signal?: AbortSignal;
   }): Promise<Response> {
     const target = await this.resolveLiveStreamTarget({ uuid: input.uuid });
-    const res = await (this.fetchImpl ?? fetch)(target.url, {
+    const res = await fetchFollowingRedirects(this.fetchImpl ?? fetch, target.url, {
       headers: target.headers,
       signal: input.signal,
-      redirect: "follow",
     });
 
     if ((res.status === 401 || res.status === 302) && this.auth?.type === "credentials") {
       await this.ensureJwt(true);
       const retried = await this.resolveLiveStreamTarget({ uuid: input.uuid });
-      return (this.fetchImpl ?? fetch)(retried.url, {
+      return fetchFollowingRedirects(this.fetchImpl ?? fetch, retried.url, {
         headers: retried.headers,
         signal: input.signal,
-        redirect: "follow",
       });
     }
     return res;
@@ -1276,13 +1289,12 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       });
     }
     const url = new URL(`${this.baseUrl}/api/channels/logos/${logoId}/cache/`);
-    return (this.fetchImpl ?? fetch)(url, {
+    return fetchFollowingRedirects(this.fetchImpl ?? fetch, url, {
       headers: {
         ...this.gateHeaders(),
         ...authHeaders(this.auth, this.accessToken),
       },
       signal,
-      redirect: "follow",
     });
   }
 

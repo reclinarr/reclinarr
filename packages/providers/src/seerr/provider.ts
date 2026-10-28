@@ -12,6 +12,7 @@ import {
   SeerrResultsPageSchema,
   SeerrTvDetailsSchema,
   SeerrTvSeasonSchema,
+  SeerrUserListSchema,
   type SeerrMediaRequest,
   type SeerrSearchResult,
   type SeerrTvDetails,
@@ -35,6 +36,7 @@ export class SeerrProvider implements DiscoveryProvider, RequestProvider {
   readonly id = "seerr";
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private seerrUsers: { at: number; byJellyfin: Map<string, number> } | null = null;
   private readonly timeoutMs: number;
   private readonly fetchImpl?: typeof fetch;
 
@@ -281,9 +283,37 @@ export class SeerrProvider implements DiscoveryProvider, RequestProvider {
     }
   }
 
+  /**
+   * The Seerr account imported for a Jellyfin user (Seerr stores the Jellyfin user id).
+   * Cached for a few minutes; a miss refreshes once in case the user was just imported.
+   */
+  async seerrUserIdForJellyfin(jellyfinUserId: string): Promise<number | null> {
+    const key = normalizeJellyfinId(jellyfinUserId);
+    const stale = !this.seerrUsers || Date.now() - this.seerrUsers.at > SEERR_USERS_TTL_MS;
+    const missRefresh =
+      this.seerrUsers && !this.seerrUsers.byJellyfin.has(key) && Date.now() - this.seerrUsers.at > 30_000;
+    if (stale || missRefresh) this.seerrUsers = { at: Date.now(), byJellyfin: await this.loadSeerrUsers() };
+    return this.seerrUsers!.byJellyfin.get(key) ?? null;
+  }
+
+  private async loadSeerrUsers(): Promise<Map<string, number>> {
+    const byJellyfin = new Map<string, number>();
+    const take = 100;
+    for (let page = 0; ; page++) {
+      const { data } = await this.http().request("GET", "/api/v1/user", {
+        query: { take, skip: page * take },
+        schema: SeerrUserListSchema,
+      });
+      for (const user of data.results) {
+        if (user.jellyfinUserId) byJellyfin.set(normalizeJellyfinId(user.jellyfinUserId), user.id);
+      }
+      if (data.results.length < take || page + 1 >= (data.pageInfo?.pages ?? 1)) return byJellyfin;
+    }
+  }
+
   async requestMedia(
     identity: MediaIdentity,
-    opts?: { seasons?: number[] | "all"; is4k?: boolean },
+    opts: { asUser: number; seasons?: number[] | "all"; is4k?: boolean },
   ): Promise<void> {
     if (!identityNeedsTmdb(identity)) {
       throw new ProviderError("Seerr request requires tmdbId and movie/tv type", {
@@ -296,16 +326,17 @@ export class SeerrProvider implements DiscoveryProvider, RequestProvider {
     const body: Record<string, unknown> = {
       mediaType: identity.mediaType,
       mediaId: identity.tmdbId,
-      is4k: opts?.is4k ?? false,
+      is4k: opts.is4k ?? false,
     };
     if (identity.mediaType === "tv") {
-      body.seasons = opts?.seasons ?? "all";
+      body.seasons = opts.seasons ?? "all";
     }
 
-    await this.http().request("POST", "/api/v1/request", { body });
+    await this.http().request("POST", "/api/v1/request", { body, headers: asUser(opts.asUser) });
   }
 
-  async listRequests(opts?: {
+  async listRequests(opts: {
+    asUser: number;
     take?: number;
     skip?: number;
     filter?: string;
@@ -313,13 +344,15 @@ export class SeerrProvider implements DiscoveryProvider, RequestProvider {
   }): Promise<{ items: MediaRequestSummary[]; total: number }> {
     const { data } = await this.http().request("GET", "/api/v1/request", {
       query: {
-        take: opts?.take ?? 50,
-        skip: opts?.skip ?? 0,
-        filter: opts?.filter ?? "all",
-        mediaType: opts?.mediaType && opts.mediaType !== "all" ? opts.mediaType : undefined,
+        take: opts.take ?? 50,
+        skip: opts.skip ?? 0,
+        filter: opts.filter ?? "all",
+        mediaType: opts.mediaType && opts.mediaType !== "all" ? opts.mediaType : undefined,
         sort: "modified",
         sortDirection: "desc",
       },
+      // Seerr shows a user without request-management rights only their own requests.
+      headers: asUser(opts.asUser),
       schema: SeerrRequestListSchema,
     });
     const results = data.results ?? [];
@@ -415,4 +448,13 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
   });
   await Promise.all(workers);
   return out;
+}
+
+const SEERR_USERS_TTL_MS = 5 * 60 * 1000;
+
+const normalizeJellyfinId = (id: string) => id.replace(/-/g, "").toLowerCase();
+
+/** With the API key, Seerr acts as the user named here instead of the admin (user 1). */
+function asUser(seerrUserId: number): Record<string, string> {
+  return { "X-API-User": String(seerrUserId) };
 }

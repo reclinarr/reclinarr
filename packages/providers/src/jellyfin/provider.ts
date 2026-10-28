@@ -118,6 +118,11 @@ export class JellyfinProvider implements LibraryProvider, PlaybackProvider {
     return data.Policy?.IsAdministrator === true;
   }
 
+  /** Revokes this session's Jellyfin access token (the device stays listed until Jellyfin prunes it). */
+  async logout(ctx: UserContext): Promise<void> {
+    await this.httpFor(ctx).request("POST", "/Sessions/Logout", { allowStatuses: [401] });
+  }
+
   /** False once Jellyfin stops accepting this token: revoked device, deleted or disabled user. */
   async isTokenValid(ctx: UserContext): Promise<boolean> {
     try {

@@ -119,8 +119,9 @@ export function loadConfig(
   };
 }
 
-/** Prefer Secure cookies when the public URL is https or NODE_ENV is production. */
+/** Secure cookies only when users reach the app over https. */
 export function sessionCookieSecure(config: AppConfig): boolean {
-  if (config.NODE_ENV === "production") return true;
+  // Keyed to how users reach the app, not NODE_ENV: the Docker image runs in production mode
+  // behind plain-HTTP nginx, where browsers silently drop a Secure cookie.
   return new URL(config.RECLINARR_PUBLIC_URL).protocol === "https:";
 }

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -35,6 +35,11 @@ export function ensureSetupToken(dataDir: string): string {
   writeFileSync(path, `${token}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
   return token;
+}
+
+/** The setup code only matters until setup is done; afterwards it should not linger on disk. */
+export function removeSetupToken(dataDir: string): void {
+  rmSync(join(dataDir, "setup-token"), { force: true });
 }
 
 function cryptoRandomToken(): string {

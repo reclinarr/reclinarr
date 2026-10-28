@@ -301,3 +301,13 @@ export type SeerrTvEpisode = z.infer<typeof SeerrTvEpisodeSchema>;
 export type SeerrTvSeason = z.infer<typeof SeerrTvSeasonSchema>;
 export type SeerrMediaInfo = z.infer<typeof MediaInfoSchema>;
 export type SeerrMediaRequest = z.infer<typeof SeerrMediaRequestSchema>;
+
+/** GET /api/v1/user — only the fields used to link Jellyfin users to Seerr accounts. */
+export const SeerrUserListSchema = z
+  .object({
+    pageInfo: z.object({ pages: z.number().optional() }).passthrough().optional(),
+    results: z.array(
+      z.object({ id: z.number(), jellyfinUserId: z.string().nullable().optional() }).passthrough(),
+    ),
+  })
+  .passthrough();

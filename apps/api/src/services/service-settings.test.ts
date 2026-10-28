@@ -113,6 +113,14 @@ describe("applyServiceEdit", () => {
     ).toThrow(expect.objectContaining({ statusCode: 409 }));
   });
 
+  it("stores addresses normalized and rejects ones nginx.conf could not hold", () => {
+    expect(applyServiceEdit(jellyfin, { values: { JELLYFIN_URL: " https://JF.example.com:8920/jellyfin/ " }, clear: [] }, {}, none))
+      .toEqual({ JELLYFIN_URL: "https://jf.example.com:8920/jellyfin" });
+    for (const bad of ["https://jf.example\n/x", "https://jf.example/a b", "https://user:pw@jf.example", "https://jf.example/?a=1", "ftp://jf.example"]) {
+      expect(() => applyServiceEdit(jellyfin, { values: { JELLYFIN_URL: bad }, clear: [] }, {}, none), bad).toThrow(ServiceEditError);
+    }
+  });
+
   it("refuses to clear a non-secret field", () => {
     expect(() => applyServiceEdit(seerr, { values: {}, clear: ["SEERR_URL"] }, {}, none)).toThrow(ServiceEditError);
   });

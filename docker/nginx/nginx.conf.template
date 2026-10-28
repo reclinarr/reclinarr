@@ -50,10 +50,18 @@ http {
       rewrite ^/_upstream/jellyfin/(.*)$ /$1 break;
       proxy_pass $jellyfin_upstream;
       proxy_ssl_server_name on;
-      proxy_ssl_name ${JELLYFIN_HOST};
+      proxy_ssl_name ${JELLYFIN_TLS_NAME};
       proxy_ssl_protocols TLSv1.2 TLSv1.3;
+      # Requests carry the user's Jellyfin token: only talk to a verified server.
+      proxy_ssl_verify ${UPSTREAM_TLS_VERIFY};
+      proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+      proxy_ssl_verify_depth 4;
       # Buffer complete VOD segments — improves throughput vs stream-copy through CF.
       proxy_buffering on;
+      # Never spool to disk: a slow client would otherwise let one request write up to 1 GiB.
+      proxy_max_temp_file_size 0;
+      add_header X-Content-Type-Options nosniff always;
+      add_header Content-Security-Policy "sandbox; default-src 'none'" always;
       proxy_request_buffering off;
       proxy_http_version 1.1;
       proxy_set_header Connection "";
@@ -73,8 +81,14 @@ http {
       rewrite ^/_upstream/dispatcharr/(.*)$ /$1 break;
       proxy_pass $dispatcharr_upstream;
       proxy_ssl_server_name on;
-      proxy_ssl_name ${DISPATCHARR_HOST};
+      proxy_ssl_name ${DISPATCHARR_TLS_NAME};
       proxy_ssl_protocols TLSv1.2 TLSv1.3;
+      # Requests carry the Dispatcharr token and Cloudflare Access secret.
+      proxy_ssl_verify ${UPSTREAM_TLS_VERIFY};
+      proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+      proxy_ssl_verify_depth 4;
+      add_header X-Content-Type-Options nosniff always;
+      add_header Content-Security-Policy "sandbox; default-src 'none'" always;
       proxy_buffering off;
       proxy_request_buffering off;
       proxy_http_version 1.1;
@@ -94,6 +108,7 @@ http {
       internal;
       alias ${RECLINARR_DATA_DIR}/hls/;
       add_header Cache-Control "no-cache" always;
+      add_header X-Content-Type-Options nosniff always;
       types {
         application/vnd.apple.mpegurl m3u8;
         video/mp2t ts;

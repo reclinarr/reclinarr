@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { MediaIdentity } from "@reclinarr/shared";
 import type { AppDb } from "../db/client.js";
 import { acquisitions as acquisitionsTable, playbackProgress } from "../db/schema.js";
-import { removeHlsDir } from "./hls-paths.js";
+import { hlsDirBytes, removeHlsDir } from "./hls-paths.js";
 
 export interface CacheManagerOptions {
   /** Max total bytes for cache-mode acquisitions on disk. */
@@ -105,10 +105,12 @@ export class CacheManager {
     // 2) Size: LRU among remaining idle cache files
     let total = 0;
     const sized = this.idleCacheRows().map((r) => {
-      const size =
+      const fileBytes =
         r.localPath && existsSync(r.localPath)
           ? statSync(r.localPath).size
           : r.bytesDownloaded || 0;
+      // The HLS sidecar is about as large as the file itself and counts against the budget too.
+      const size = fileBytes + (this.opts.dataDir ? hlsDirBytes(this.opts.dataDir, r.id) : 0);
       total += size;
       return { row: r, size };
     });

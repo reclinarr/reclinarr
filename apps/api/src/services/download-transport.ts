@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import type { DownloadTransport } from "@reclinarr/shared";
+import { fetchFollowingRedirects } from "@reclinarr/providers";
 
 export class HttpDownloadTransport implements DownloadTransport {
   async start(opts: {
@@ -18,10 +19,9 @@ export class HttpDownloadTransport implements DownloadTransport {
     const headers = { ...opts.headers };
     if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
 
-    const res = await fetch(opts.url, {
+    const res = await fetchFollowingRedirects(fetch, opts.url, {
       headers,
       signal: opts.signal,
-      redirect: "follow",
     });
     await this.pipeResponse({
       response: res,

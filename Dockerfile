@@ -2,7 +2,7 @@
 #   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 #   docker compose -f docker/docker-compose.yml up -d --build
 
-FROM node:24-alpine AS build
+FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
@@ -11,14 +11,14 @@ COPY packages ./packages
 COPY tsconfig.base.json ./
 # TV app is excluded from the image; stub the workspace so npm install succeeds.
 RUN mkdir -p apps/tv && printf '%s\n' '{"name":"@reclinarr/tv","private":true,"version":"0.1.0"}' > apps/tv/package.json
-RUN npm install
+RUN npm ci --no-audit --no-fund
 RUN npm run build -w @reclinarr/shared
 RUN npm run build -w @reclinarr/client
 RUN npm run build -w @reclinarr/providers
 RUN npm run build -w @reclinarr/api
 RUN npm run build -w @reclinarr/web
 
-FROM node:24-alpine AS runtime
+FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # nginx (media plane) + ffmpeg/ffprobe (HLS packager) + gettext (envsubst).

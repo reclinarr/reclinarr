@@ -32,6 +32,20 @@ export function artworkUri(
   }
 }
 
+/** The session must only reach Reclinarr itself, never TMDb or an IPTV provider's logo host. */
+function sessionHeadersFor(
+  uri: string,
+  headers: Record<string, string>,
+  baseUrl: string | null | undefined,
+): Record<string, string> | undefined {
+  if (!baseUrl) return undefined;
+  try {
+    return new URL(uri).origin === new URL(baseUrl).origin ? headers : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function useSessionAuth(): { headers: Record<string, string>; sessionId: string | null } | null {
   const [auth, setAuth] = useState<{ headers: Record<string, string>; sessionId: string | null } | null>(
     null,
@@ -84,7 +98,7 @@ export function Artwork({
   if (!uri || !auth) return null;
   return (
     <Image
-      source={{ uri, headers: auth.headers }}
+      source={{ uri, headers: sessionHeadersFor(uri, auth.headers, tryGetClient()?.baseUrl) }}
       style={style}
       resizeMode={resizeMode}
       resizeMethod="resize"

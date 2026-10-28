@@ -85,6 +85,12 @@ describe("demo accounts", () => {
     }
   });
 
+  it("keeps the raw VOD debug route to admins", async () => {
+    const { app, headers } = await start("alice");
+    const url = "/api/playback/dispatcharr/vod/00000000-0000-4000-8000-000000000001?raw=1";
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+  });
+
   it("still lets regular users resolve IPTV-only titles", async () => {
     const { app, ctx, headers } = await start("alice");
     const resolve = await app.inject({
@@ -112,6 +118,24 @@ describe("demo accounts", () => {
     const home = await app.inject({ method: "GET", url: "/api/home", headers });
     expect(home.statusCode).toBe(200);
     expect(trending).not.toHaveBeenCalled();
+  });
+
+  it("refuses requests from users without a Seerr account", async () => {
+    const { app, ctx, headers } = await start("alice");
+    vi.spyOn(ctx.seerr, "seerrUserIdForJellyfin").mockResolvedValue(null);
+    const requestMedia = vi.spyOn(ctx.seerr, "requestMedia");
+    const request = await app.inject({ method: "POST", url: "/api/request", headers, payload: { identity } });
+    expect(request.statusCode).toBe(403);
+    expect(request.json().error).toMatch(/Seerr/);
+    expect(requestMedia).not.toHaveBeenCalled();
+  });
+
+  it("requests as the user's own Seerr account", async () => {
+    const { app, ctx, headers } = await start("alice");
+    vi.spyOn(ctx.seerr, "seerrUserIdForJellyfin").mockResolvedValue(7);
+    const requestMedia = vi.spyOn(ctx.seerr, "requestMedia").mockResolvedValue();
+    await app.inject({ method: "POST", url: "/api/request", headers, payload: { identity } });
+    expect(requestMedia).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ asUser: 7 }));
   });
 
   it("leaves regular users untouched", async () => {

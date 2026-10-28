@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DispatcharrProvider, JellyfinProvider } from "@reclinarr/providers";
 import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
+import { safeProxiedContentType, sandboxProxiedContent } from "../services/media-plane.js";
 
 export async function registerImageRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/images/dispatcharr/logo/:logoId", async (req, reply) => {
@@ -15,8 +16,10 @@ export async function registerImageRoutes(app: FastifyInstance, ctx: AppContext)
 
     const upstream = await ctx.dispatcharr.openLogo(logoId);
     reply.status(upstream.status);
-    const ct = upstream.headers.get("content-type");
-    if (ct) reply.header("Content-Type", ct);
+    sandboxProxiedContent(reply).header(
+      "Content-Type",
+      safeProxiedContentType(upstream.headers.get("content-type"), "image"),
+    );
     reply.header("Cache-Control", "private, max-age=3600");
     if (!upstream.body) {
       return reply.send(Buffer.from(await upstream.arrayBuffer()));
@@ -52,8 +55,10 @@ export async function registerImageRoutes(app: FastifyInstance, ctx: AppContext)
       resize,
     );
     reply.status(upstream.status);
-    const ct = upstream.headers.get("content-type");
-    if (ct) reply.header("Content-Type", ct);
+    sandboxProxiedContent(reply).header(
+      "Content-Type",
+      safeProxiedContentType(upstream.headers.get("content-type"), "image"),
+    );
     reply.header("Cache-Control", "private, max-age=3600");
     if (!upstream.body) {
       return reply.send(Buffer.from(await upstream.arrayBuffer()));

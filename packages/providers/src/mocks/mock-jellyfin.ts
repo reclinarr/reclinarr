@@ -91,6 +91,8 @@ export class MockJellyfinProvider implements LibraryProvider, PlaybackProvider {
     return true;
   }
 
+  async logout(): Promise<void> {}
+
   async authenticate() {
     return {
       userId: "mock-user",

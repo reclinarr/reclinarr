@@ -6,9 +6,21 @@ import type { AppContext } from "../context.js";
 import { requireFullAccess } from "../plugins/auth.js";
 import { resolveMediaByTmdb } from "../services/media-enrichment.js";
 
+/** Requests run as the user's own Seerr account, so its permissions, quotas and 4K rights apply. */
+async function linkedSeerrUser(ctx: AppContext, jellyfinUserId: string): Promise<number> {
+  const seerrUser = await ctx.seerr.seerrUserIdForJellyfin(jellyfinUserId);
+  if (seerrUser === null) {
+    throw Object.assign(
+      new Error("Your account isn't set up in Seerr yet. Ask the server owner to import it in Seerr."),
+      { statusCode: 403 },
+    );
+  }
+  return seerrUser;
+}
+
 export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.get("/api/requests", async (req) => {
-    await requireFullAccess(ctx, req);
+    const { session } = await requireFullAccess(ctx, req);
     const query = z
       .object({
         take: z.coerce.number().int().positive().max(100).optional(),
@@ -23,6 +35,7 @@ export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContex
     }
 
     return ctx.seerr.listRequests({
+      asUser: await linkedSeerrUser(ctx, session.jellyfinUserId),
       take: query.take ?? 25,
       skip: query.skip ?? 0,
       filter: query.filter,
@@ -31,7 +44,7 @@ export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContex
   });
 
   app.post("/api/request", async (req) => {
-    const { userContext } = await requireFullAccess(ctx, req);
+    const { userContext, session } = await requireFullAccess(ctx, req);
     const body = z
       .object({
         identity: MediaIdentitySchema,
@@ -53,6 +66,7 @@ export async function registerRequestRoutes(app: FastifyInstance, ctx: AppContex
     }
 
     await ctx.seerr.requestMedia(identity, {
+      asUser: await linkedSeerrUser(ctx, session.jellyfinUserId),
       seasons: body.seasons,
       is4k: body.is4k,
     });

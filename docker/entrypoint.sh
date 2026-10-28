@@ -30,8 +30,31 @@ dispatcharr_url="${dispatcharr_url:-http://127.0.0.1:9191}"
 
 export JELLYFIN_UPSTREAM="$(printf '%s' "$jellyfin_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
 export DISPATCHARR_UPSTREAM="$(printf '%s' "$dispatcharr_url" | sed -E 's#^(https?://[^/]+).*#\1#')"
+
+# These values are written into nginx.conf, and config.json is editable from the admin UI:
+# accept only a bare scheme://host[:port] origin on a single line.
+require_origin() {
+  if [ "$(printf '%s' "$2" | wc -l)" -ne 0 ] \
+    || ! printf '%s' "$2" | grep -Eqx 'https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?'; then
+    echo "[entrypoint] $1 must be an http(s) address such as https://jellyfin.example.com" >&2
+    exit 1
+  fi
+}
+require_origin JELLYFIN_URL "$JELLYFIN_UPSTREAM"
+require_origin DISPATCHARR_URL "$DISPATCHARR_UPSTREAM"
+
 export JELLYFIN_HOST="$(printf '%s' "$JELLYFIN_UPSTREAM" | sed -E 's#^https?://##')"
 export DISPATCHARR_HOST="$(printf '%s' "$DISPATCHARR_UPSTREAM" | sed -E 's#^https?://##')"
+# Certificate checks need the bare host name: no port, no IPv6 brackets.
+export JELLYFIN_TLS_NAME="$(printf '%s' "$JELLYFIN_HOST" | sed -E 's#:[0-9]+$##; s#^\[(.*)\]$#\1#')"
+export DISPATCHARR_TLS_NAME="$(printf '%s' "$DISPATCHARR_HOST" | sed -E 's#:[0-9]+$##; s#^\[(.*)\]$#\1#')"
+
+# nginx verifies https upstream certificates against the system CA bundle. Self-signed
+# upstreams can opt out with RECLINARR_UPSTREAM_TLS_VERIFY=false.
+case "${RECLINARR_UPSTREAM_TLS_VERIFY:-true}" in
+  false|0) export UPSTREAM_TLS_VERIFY=off ;;
+  *) export UPSTREAM_TLS_VERIFY=on ;;
+esac
 export DISPATCHARR_CF_ACCESS_CLIENT_ID="${DISPATCHARR_CF_ACCESS_CLIENT_ID:-}"
 export DISPATCHARR_CF_ACCESS_CLIENT_SECRET="${DISPATCHARR_CF_ACCESS_CLIENT_SECRET:-}"
 
@@ -39,7 +62,7 @@ export DISPATCHARR_CF_ACCESS_CLIENT_SECRET="${DISPATCHARR_CF_ACCESS_CLIENT_SECRE
 # Docker's embedded DNS on Compose networks, the host's resolvers on the default bridge.
 export NGINX_RESOLVERS="$(awk '/^nameserver/ { ip = $2; if (ip ~ /:/) ip = "[" ip "]"; printf "%s ", ip }' /etc/resolv.conf)"
 
-envsubst '${RECLINARR_PORT} ${RECLINARR_API_PORT} ${RECLINARR_DATA_DIR} ${NGINX_RESOLVERS} ${JELLYFIN_UPSTREAM} ${JELLYFIN_HOST} ${DISPATCHARR_UPSTREAM} ${DISPATCHARR_HOST} ${DISPATCHARR_CF_ACCESS_CLIENT_ID} ${DISPATCHARR_CF_ACCESS_CLIENT_SECRET}' \
+envsubst '${RECLINARR_PORT} ${RECLINARR_API_PORT} ${RECLINARR_DATA_DIR} ${NGINX_RESOLVERS} ${JELLYFIN_UPSTREAM} ${JELLYFIN_HOST} ${JELLYFIN_TLS_NAME} ${DISPATCHARR_UPSTREAM} ${DISPATCHARR_HOST} ${DISPATCHARR_TLS_NAME} ${UPSTREAM_TLS_VERIFY} ${DISPATCHARR_CF_ACCESS_CLIENT_ID} ${DISPATCHARR_CF_ACCESS_CLIENT_SECRET}' \
   < /etc/nginx/nginx.conf.template \
   > /etc/nginx/nginx.conf
 
@@ -53,6 +76,11 @@ PGID="${PGID:-1000}"
 case "$PUID$PGID" in
   *[!0-9]*) echo "[entrypoint] PUID and PGID must be numeric" >&2; exit 1 ;;
 esac
+# 0 would silently run the API, packager, nginx and ffmpeg as root.
+if { [ "$PUID" = 0 ] || [ "$PGID" = 0 ]; } && [ "${RECLINARR_ALLOW_ROOT:-false}" != true ]; then
+  echo "[entrypoint] PUID/PGID 0 runs everything as root; set RECLINARR_ALLOW_ROOT=true to allow it" >&2
+  exit 1
+fi
 sed -i -E "s/^node:x:[0-9]+:[0-9]+:/node:x:$PUID:$PGID:/" /etc/passwd
 sed -i -E "s/^node:x:[0-9]+:/node:x:$PGID:/" /etc/group
 chown -R node:node /run/nginx /var/log/nginx /var/lib/nginx /home/node
@@ -86,9 +114,13 @@ as_node() {
 }
 
 # API on loopback; nginx publishes RECLINARR_PORT.
+# The API hands media to nginx only while its upstream matches what nginx was rendered with
+# (an admin edit reloads the API in-process but nginx keeps these until the next start).
 RECLINARR_PORT="$RECLINARR_API_PORT" \
 RECLINARR_MEDIA_PLANE=nginx \
 RECLINARR_EMBED_PACKAGER=false \
+RECLINARR_NGINX_JELLYFIN_UPSTREAM="$JELLYFIN_UPSTREAM" \
+RECLINARR_NGINX_DISPATCHARR_UPSTREAM="$DISPATCHARR_UPSTREAM" \
   as_node node /app/apps/api/dist/server.js &
 API_PID=$!
 

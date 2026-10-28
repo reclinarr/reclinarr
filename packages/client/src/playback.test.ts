@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlaybackSource } from "@reclinarr/shared";
-import { classifyPlayback, sessionCookieHeader } from "./playback.js";
+import { classifyPlayback, playbackMediaUrl, sessionCookieHeader } from "./playback.js";
 
 function source(partial: {
   url: string;
@@ -86,5 +86,14 @@ describe("sessionCookieHeader", () => {
     } finally {
       Object.defineProperty(globalThis, "navigator", { value: prev, configurable: true });
     }
+  });
+});
+
+describe("playbackMediaUrl session binding", () => {
+  it("adds the session only to Reclinarr's own /api/ URLs", () => {
+    const origin = "https://media.example";
+    expect(playbackMediaUrl("/api/playback/x.m3u8", origin, "sid")).toBe("https://media.example/api/playback/x.m3u8?reclinarr_session=sid");
+    expect(playbackMediaUrl("https://other.example/api/playback/x", origin, "sid")).toBe("https://other.example/api/playback/x");
+    expect(playbackMediaUrl("https://image.tmdb.org/t/p/w500/a.jpg", origin, "sid")).toBe("https://image.tmdb.org/t/p/w500/a.jpg");
   });
 });

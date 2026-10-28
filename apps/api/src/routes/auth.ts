@@ -94,9 +94,13 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: AppContext):
   );
 
   app.post("/api/auth/logout", async (req, reply) => {
-    if (req.session) {
+    if (req.session && req.userContext) {
       releaseLivePlayback(ctx, req.session.id);
       await ctx.sessions.destroy(req.session.id);
+      // Revoke the Jellyfin token too, so a copied session or token stops working upstream.
+      await ctx.jellyfin.logout(req.userContext).catch((err: unknown) => {
+        req.log.warn({ err }, "could not revoke the Jellyfin token on logout");
+      });
     }
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return { ok: true };
