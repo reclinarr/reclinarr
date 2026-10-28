@@ -43,7 +43,14 @@ export async function registerAdminRoutes(
     const service = serviceDefinition(req.params.service);
     if (!service) throw httpError("Unknown service", 404);
     const edit = ServiceEditSchema.parse(req.body);
-    return probeSetupService(probeInputFor(service, edit, ctx.config, envLockedKeys(process.env)));
+    let input: ReturnType<typeof probeInputFor>;
+    try {
+      input = probeInputFor(service, edit, ctx.config, envLockedKeys(process.env));
+    } catch (err) {
+      if (err instanceof ServiceEditError) throw httpError(err.message, err.statusCode);
+      throw err;
+    }
+    return probeSetupService(input);
   });
 
   app.put<{ Params: { service: string } }>("/api/admin/services/:service", limited, async (req, reply) => {
@@ -53,7 +60,17 @@ export async function registerAdminRoutes(
     const edit = ServiceEditSchema.parse(req.body);
     let next: Record<string, string>;
     try {
-      next = applyServiceEdit(service, edit, readSetupConfig(ctx.config.RECLINARR_DATA_DIR), envLockedKeys(process.env));
+      const cloudflareAccess =
+        service.id === "dispatcharr" && ctx.config.DISPATCHARR_CF_ACCESS_CLIENT_SECRET
+          ? ["A Cloudflare Access token"]
+          : [];
+      next = applyServiceEdit(
+        service,
+        edit,
+        readSetupConfig(ctx.config.RECLINARR_DATA_DIR),
+        envLockedKeys(process.env),
+        cloudflareAccess,
+      );
     } catch (err) {
       if (err instanceof ServiceEditError) throw httpError(err.message, err.statusCode);
       throw err;

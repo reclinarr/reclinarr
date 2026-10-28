@@ -1147,6 +1147,14 @@ export class ReclinarrClient {
     );
   }
 
+  /** Keep the live tune alive; the server releases the IPTV slot for viewers that stop sending this. */
+  liveHeartbeat(uuid: string) {
+    return this.request<{ ok: boolean }>("/api/live/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({ uuid }),
+    });
+  }
+
   /** Release IPTV/live-HLS when leaving the player (back / close / unmount). */
   stopLivePlayback(uuid?: string) {
     return this.request<{ ok: true }>("/api/live/stop", {
@@ -1396,4 +1404,8 @@ export function playLiveChannel(uuid: string, opts?: { hls?: boolean }) {
 
 export function stopLivePlayback(uuid?: string) {
   return getClient().stopLivePlayback(uuid);
+}
+
+export function liveHeartbeat(uuid: string) {
+  return getClient().liveHeartbeat(uuid);
 }

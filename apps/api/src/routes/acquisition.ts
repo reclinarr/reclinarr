@@ -6,7 +6,7 @@ import {
   tmdbLanguageReference,
 } from "@reclinarr/shared";
 import type { AppContext } from "../context.js";
-import { requireAuth, requireFullAccess } from "../plugins/auth.js";
+import { requireFullAccess } from "../plugins/auth.js";
 
 function publicAcquisition<T extends { localPath?: string }>(item: T): Omit<T, "localPath"> {
   const { localPath: _localPath, ...rest } = item;
@@ -18,12 +18,12 @@ export async function registerAcquisitionRoutes(
   ctx: AppContext,
 ): Promise<void> {
   app.get("/api/acquisitions", async (req) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     return { items: ctx.acquisitions.list().map(publicAcquisition) };
   });
 
   app.get("/api/acquisitions/:id", async (req) => {
-    await requireAuth(req);
+    await requireFullAccess(ctx, req);
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const item = ctx.acquisitions.get(id);
     if (!item) {

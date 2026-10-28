@@ -3,6 +3,7 @@ import { liveVideoEncoder } from "./ffmpeg-video-encoder.js";
 import {
   buildLiveHlsFfmpegArgs,
   liveHlsRestartDelayMs,
+  LIVE_VIEWER_TTL_MS,
   LiveHlsManager,
 } from "./live-hls.js";
 import { IptvConnectionManager } from "./iptv-connection-manager.js";
@@ -26,6 +27,36 @@ describe("live viewer ownership", () => {
     expect(manager.releaseViewer("web", "other")).toBeUndefined();
     expect(manager.releaseViewer("web", "shared")).toBe("shared");
     expect(manager.hasViewer("tv", "other")).toBe(true);
+  });
+});
+
+describe("live viewer heartbeat", () => {
+  it("releases the IPTV hold once every viewer of a channel stops heartbeating", () => {
+    const iptv = new IptvConnectionManager(2);
+    const manager = new LiveHlsManager("/tmp/reclinarr-viewer-test", iptv);
+    manager.registerViewer("crashed-tv", "ch-a");
+    iptv.holdLive("ch-a");
+    manager.registerViewer("phone", "ch-b");
+    iptv.holdLive("ch-b");
+    expect(iptv.active).toBe(2);
+
+    const later = Date.now() + LIVE_VIEWER_TTL_MS + 1_000;
+    // The phone kept heartbeating; the TV went silent.
+    vi.spyOn(Date, "now").mockReturnValue(later - 10_000);
+    expect(manager.heartbeat("phone", "ch-b")).toBe(true);
+    manager.reapSilentViewers(later);
+
+    expect(manager.hasViewer("crashed-tv", "ch-a")).toBe(false);
+    expect(manager.hasViewer("phone", "ch-b")).toBe(true);
+    expect(iptv.snapshot().map((l) => l.label)).toEqual(["live:ch-b"]);
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a heartbeat for a channel the owner is not tuned to", () => {
+    const manager = new LiveHlsManager("/tmp/reclinarr-viewer-test", new IptvConnectionManager(1));
+    manager.registerViewer("web", "ch-a");
+    expect(manager.heartbeat("web", "ch-b")).toBe(false);
+    expect(manager.heartbeat("other", "ch-a")).toBe(false);
   });
 });
 

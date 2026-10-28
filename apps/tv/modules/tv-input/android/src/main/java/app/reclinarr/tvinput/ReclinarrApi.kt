@@ -76,6 +76,11 @@ class ReclinarrApi(private val credentials: Credentials) {
     request("POST", "/api/live/stop", JSONObject().put("uuid", uuid))
   }
 
+  /** Keeps the tune alive; the server releases the IPTV slot for viewers that stop sending this. */
+  fun heartbeat(uuid: String) {
+    request("POST", "/api/live/heartbeat", JSONObject().put("uuid", uuid))
+  }
+
   fun download(path: String, out: OutputStream) {
     val conn = open("GET", mediaUrl(path))
     try {

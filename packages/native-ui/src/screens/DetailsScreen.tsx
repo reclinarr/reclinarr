@@ -638,6 +638,7 @@ export function DetailsScreen({
   const acquisitionsQuery = useQuery({
     queryKey: ["acquisitions"],
     queryFn: () => listAcquisitions(),
+    enabled: !demo,
     refetchInterval: (result) =>
       (result.state.data?.items ?? []).some((item) =>
         ["queued", "downloading", "playable"].includes(item.state),

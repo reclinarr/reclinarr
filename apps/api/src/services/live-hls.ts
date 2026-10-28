@@ -19,6 +19,8 @@ import type { IptvConnectionManager, IptvLease } from "./iptv-connection-manager
 const READY_TIMEOUT_MS = 35_000;
 const IDLE_MS = 120_000;
 const REAP_MS = 15_000;
+/** Players heartbeat every 30s; a viewer silent this long is gone (crashed app, lost network). */
+export const LIVE_VIEWER_TTL_MS = 120_000;
 const HLS_TIME = 2;
 /** Sliding window — keep enough that AVPlayer can buffer before delete_segments. */
 const HLS_LIST_SIZE = 12;
@@ -142,6 +144,7 @@ export class LiveHlsManager {
   private timer?: ReturnType<typeof setInterval>;
   private stopped = false;
   private readonly viewers = new Map<string, string>();
+  private readonly viewerSeenAt = new Map<string, number>();
   private readonly pending = new Map<string, Promise<void>>();
   /** Last opener per channel — used to restart after an unexpected ffmpeg exit. */
   private readonly openers = new Map<string, OpenLiveStream>();
@@ -181,6 +184,14 @@ export class LiveHlsManager {
 
   registerViewer(owner: string, uuid: string): void {
     this.viewers.set(owner, uuid);
+    this.viewerSeenAt.set(owner, Date.now());
+  }
+
+  /** Keeps a viewer alive. False when the owner is not tuned to this channel (re-tune needed). */
+  heartbeat(owner: string, uuid: string): boolean {
+    if (this.viewers.get(owner) !== uuid) return false;
+    this.viewerSeenAt.set(owner, Date.now());
+    return true;
   }
 
   hasViewer(owner: string, uuid: string): boolean {
@@ -199,6 +210,7 @@ export class LiveHlsManager {
     const current = this.viewers.get(owner);
     if (!current || (uuid && uuid !== current)) return undefined;
     this.viewers.delete(owner);
+    this.viewerSeenAt.delete(owner);
     return this.channelHasViewers(current) ? undefined : current;
   }
 
@@ -453,10 +465,29 @@ export class LiveHlsManager {
         // Drop abandoned viewer rows (crashed tab / missed stop) so we do not
         // keep auto-restarting a channel nobody is polling anymore.
         for (const [owner, channel] of [...this.viewers.entries()]) {
-          if (channel === uuid) this.viewers.delete(owner);
+          if (channel === uuid) {
+            this.viewers.delete(owner);
+            this.viewerSeenAt.delete(owner);
+          }
         }
         this.stopChannel(uuid);
       }
+    }
+    this.reapSilentViewers(now);
+  }
+
+  /**
+   * nginx-proxied MPEG-TS gives the API no disconnect signal, so the IPTV hold for a channel
+   * is released once every viewer of it has stopped heartbeating.
+   */
+  reapSilentViewers(now = Date.now()): void {
+    for (const [owner, uuid] of [...this.viewers.entries()]) {
+      if (now - (this.viewerSeenAt.get(owner) ?? 0) <= LIVE_VIEWER_TTL_MS) continue;
+      const unused = this.releaseViewer(owner, uuid);
+      if (!unused) continue;
+      console.info(`[live-hls] releasing ${unused}: no viewer heartbeat`);
+      this.stopChannel(unused);
+      this.iptv.releaseLiveChannel(unused);
     }
   }
 }

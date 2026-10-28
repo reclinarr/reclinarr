@@ -29,6 +29,7 @@ import {
   playbackMediaUrl,
   playLiveChannel,
   stopLivePlayback,
+  liveHeartbeat,
   reportIptvProgress,
   reportProgress,
   resolvePlaybackForPlay,
@@ -85,6 +86,8 @@ const SEEK_HOLD_DELAY_MS = 320;
 const SEEK_HOLD_INTERVAL_MS = 280;
 /** Silent live reloads before surfacing an error (upstream blips / remux exits). */
 const LIVE_RECOVER_MAX = 8;
+/** Server reaps live viewers silent for 2 min (nginx-proxied streams give it no disconnect signal). */
+const LIVE_HEARTBEAT_MS = 30_000;
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
@@ -690,6 +693,15 @@ export function PlayerScreen({
     liveRecovering.current = false;
     clearLiveRecoverTimer();
   }, [clearLiveRecoverTimer, params.channelUuid]);
+
+  useEffect(() => {
+    const uuid = params.channelUuid;
+    if (!isLive || !uuid) return;
+    const id = setInterval(() => {
+      void liveHeartbeat(uuid).catch(() => undefined);
+    }, LIVE_HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, [isLive, params.channelUuid]);
 
   useEffect(() => {
     if (!isLive || Platform.OS !== "web") return;

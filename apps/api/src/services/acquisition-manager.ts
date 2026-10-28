@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createReadStream, existsSync, renameSync, statSync } from "node:fs";
+import { createReadStream, existsSync, linkSync, statSync, unlinkSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -391,7 +391,7 @@ export class AcquisitionManager {
 
     const dest = await this.libraryDest(job.identity, meta);
     await mkdir(dirname(dest), { recursive: true });
-    renameSync(job.localPath, dest);
+    moveIntoLibrary(job.localPath, dest);
     removeHlsDir(this.dataDir, id);
     const updated = this.patch(id, {
       mode: "library",
@@ -494,9 +494,12 @@ export class AcquisitionManager {
       // Connection released when upstream body ends.
       if (finalJob?.mode === "library" && finalJob.localPath) {
         const dest = await this.libraryDest(finalJob.identity);
-        if (finalJob.localPath !== dest && existsSync(finalJob.localPath)) {
+        if (finalJob.localPath !== dest && existsSync(finalJob.localPath) && existsSync(dest)) {
+          console.warn(`[acquisition] ${id}: library path already taken, keeping the file in cache: ${dest}`);
+          this.patch(id, { mode: "cache" });
+        } else if (finalJob.localPath !== dest && existsSync(finalJob.localPath)) {
           await mkdir(dirname(dest), { recursive: true });
-          renameSync(finalJob.localPath, dest);
+          moveIntoLibrary(finalJob.localPath, dest);
           this.patch(id, {
             state: "completed",
             localPath: dest,
@@ -612,4 +615,20 @@ export function cacheExpiresAtIso(updatedAt: string, ttlMs: number): string {
   const base = Date.parse(updatedAt);
   const at = Number.isFinite(base) ? base + ttlMs : Date.now() + ttlMs;
   return new Date(at).toISOString();
+}
+
+/**
+ * Moves a finished file into the library without ever replacing an existing one: two titles can
+ * map to the same path, and rename() would silently overwrite the other title's file.
+ */
+function moveIntoLibrary(src: string, dest: string): void {
+  try {
+    linkSync(src, dest);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      throw Object.assign(new Error("A different file already exists at this library path"), { statusCode: 409 });
+    }
+    throw err;
+  }
+  unlinkSync(src);
 }

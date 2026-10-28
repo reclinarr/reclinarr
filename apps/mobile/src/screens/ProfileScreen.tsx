@@ -38,10 +38,10 @@ export function ProfileScreen() {
         <Text style={styles.copy}>Cache, requests, and playback languages.</Text>
         <PlaybackLanguageSettings />
         {session.data?.user.id ? <AnalyticsConsentSettings userId={session.data.user.id} /> : null}
-        <Button label="Cache" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
-        <View style={{ height: 10 }} />
         {session.data?.user.demo ? null : (
           <>
+            <Button label="Cache" variant="ghost" onPress={() => navigation.navigate("Downloads")} />
+            <View style={{ height: 10 }} />
             <Button label="Requests" variant="ghost" onPress={() => navigation.navigate("Requests")} />
             <View style={{ height: 10 }} />
           </>

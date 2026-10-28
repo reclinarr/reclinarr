@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isJellyfinMediaPath,
+  JellyfinProvider,
   normalizeJellyfinRelativePath,
 } from "./provider.js";
 
@@ -46,5 +47,28 @@ describe("isJellyfinMediaPath", () => {
     expect(isJellyfinMediaPath("/Users")).toBe(false);
     expect(isJellyfinMediaPath("/Items/abc")).toBe(false);
     expect(isJellyfinMediaPath("/System/Info")).toBe(false);
+  });
+});
+
+describe("resolveJellyfinMediaUrl", () => {
+  const provider = (baseUrl: string) => new JellyfinProvider({ baseUrl });
+
+  it("keeps real media paths, including under a base path", () => {
+    expect(provider(BASE).resolveJellyfinMediaUrl("/Videos/abc/master.m3u8?x=1").pathname).toBe("/Videos/abc/master.m3u8");
+    expect(provider(`${BASE}/jellyfin`).resolveJellyfinMediaUrl("/Videos/abc/stream.mp4").pathname).toBe(
+      "/jellyfin/Videos/abc/stream.mp4",
+    );
+  });
+
+  it("rejects paths that only look like media before URL parsing", () => {
+    for (const path of ["/Users/u1#/videos/", "/Users/u1#.mp4", "/videos/%2e%2e/System/Info", "/videos/%2E%2E/%2e%2e/admin"]) {
+      expect(() => provider(BASE).resolveJellyfinMediaUrl(path), path).toThrow(/media stream path|Invalid/);
+    }
+  });
+
+  it("does not let encoded dot segments leave a base path", () => {
+    expect(() =>
+      provider(`${BASE}/jellyfin`).resolveJellyfinMediaUrl("/videos/%2e%2e/%2e%2e/other-app/videos/x"),
+    ).toThrow(/media stream path/);
   });
 });

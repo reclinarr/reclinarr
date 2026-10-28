@@ -23,7 +23,7 @@ export function sanitizeLibraryName(raw: string, fallback = "Unknown"): string {
 /**
  * Jellyfin-friendly relative path under RECLINARR_DATA_DIR.
  * Movies: library/movies/{Title} ({Year})/{Title} ({Year}).mkv
- * Episodes: library/series/{Show}/Season NN/{Show} - SxxExx - {Ep}.mkv
+ * Episodes: library/series/{Show} ({Year}) [tmdbid-N]/Season NN/{Show} - SxxExx - {Ep}.mkv
  */
 export function buildLibraryRelativePath(
   identity: MediaIdentity,
@@ -39,7 +39,10 @@ export function buildLibraryRelativePath(
     const epCode = `S${String(season).padStart(2, "0")}E${String(ep).padStart(2, "0")}`;
     const epTitle = meta?.episodeTitle ? ` - ${sanitizeLibraryName(meta.episodeTitle)}` : "";
     const file = `${show} - ${epCode}${epTitle}.mkv`;
-    return join("library", "series", show, seasonDir, file);
+    // Year + TMDb id keep same-named series apart (The Office US / UK); Jellyfin reads [tmdbid-N].
+    const yearPart = meta?.year ? ` (${meta.year})` : "";
+    const idPart = identity.tmdbId ? ` [tmdbid-${identity.tmdbId}]` : "";
+    return join("library", "series", `${show}${yearPart}${idPart}`, seasonDir, file);
   }
 
   const title = sanitizeLibraryName(meta?.title || `TMDb ${identity.tmdbId ?? "unknown"}`);

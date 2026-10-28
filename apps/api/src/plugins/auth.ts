@@ -11,11 +11,13 @@ declare module "fastify" {
 }
 
 function sessionIdFromRequest(req: FastifyRequest): string | undefined {
-  const fromCookie = req.cookies[SESSION_COOKIE];
-  if (fromCookie) return fromCookie;
+  // The explicit header wins: a cookie can be planted by another origin on the same host
+  // (cookies ignore ports), and on plain-HTTP deployments the client's own Secure cookie is dropped.
   const header = req.headers[SESSION_HEADER];
   const fromHeader = Array.isArray(header) ? header[0] : header;
   if (fromHeader?.trim()) return fromHeader.trim();
+  const fromCookie = req.cookies[SESSION_COOKIE];
+  if (fromCookie) return fromCookie;
   // React Native Image often cannot attach custom headers; TV artwork uses ?reclinarr_session=.
   const query = req.query as Record<string, unknown> | undefined;
   const fromQuery = query?.[SESSION_COOKIE];
@@ -32,17 +34,44 @@ function toUserContext(session: SessionRecord): UserContext {
   };
 }
 
+/** How long a session may go without re-checking its Jellyfin token. */
+export const SESSION_REVALIDATE_MS = 5 * 60 * 1000;
+
 export async function registerAuth(app: FastifyInstance, ctx: AppContext): Promise<void> {
   app.decorateRequest("session", undefined);
   app.decorateRequest("userContext", undefined);
+
+  // Jellyfin is the identity authority: a session dies when Jellyfin stops accepting its token
+  // (password reset, disabled or deleted user, revoked device), not only at the 14-day expiry.
+  const validatedAt = new Map<string, number>();
 
   app.addHook("preHandler", async (req) => {
     const sid = sessionIdFromRequest(req);
     if (!sid) return;
     const session = await ctx.sessions.get(sid);
     if (!session) return;
+    const userContext = toUserContext(session);
+
+    const now = Date.now();
+    const lastChecked = Math.max(validatedAt.get(session.id) ?? 0, session.createdAt.getTime());
+    if (now - lastChecked > SESSION_REVALIDATE_MS) {
+      try {
+        const valid = await ctx.jellyfin.isTokenValid(userContext);
+        if (!valid) {
+          validatedAt.delete(session.id);
+          await ctx.sessions.destroy(session.id);
+          req.log.info({ userId: session.jellyfinUserId }, "session ended: Jellyfin rejected its token");
+          return;
+        }
+      } catch (err) {
+        // Jellyfin unreachable: keep the session rather than logging everyone out; retry next window.
+        req.log.warn({ err }, "session revalidation against Jellyfin failed");
+      }
+      validatedAt.set(session.id, now);
+    }
+
     req.session = session;
-    req.userContext = toUserContext(session);
+    req.userContext = userContext;
   });
 }
 

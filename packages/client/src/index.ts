@@ -52,6 +52,7 @@ export {
   toggleLiveFavourite,
   playLiveChannel,
   stopLivePlayback,
+  liveHeartbeat,
 } from "./api.js";
 export type { ReclinarrClientOptions, LoginResult, TelemetryFeature } from "./api.js";
 export {

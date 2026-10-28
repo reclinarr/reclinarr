@@ -56,6 +56,8 @@ export class PlaybackResolver {
       preferredAudioLanguage?: string;
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
+      /** Demo accounts: Jellyfin library only — never IPTV playback or cache downloads. */
+      libraryOnly?: boolean;
     },
   ): Promise<PlaybackResolveResult | null> {
     const target = identity.mediaType === "tv"
@@ -156,10 +158,12 @@ export class PlaybackResolver {
       preferredAudioLanguage?: string;
       maxStreamingBitrate?: number;
       deviceProfile?: "web" | "ios" | "android";
+      /** Demo accounts: Jellyfin library only — never IPTV playback or cache downloads. */
+      libraryOnly?: boolean;
     },
   ): Promise<PlaybackResolveResult | null> {
     /** Local library hit (movie/series/episode id) — never fall through to IPTV. */
-    let skipIptv = Boolean(identity.jellyfinItemId);
+    let skipIptv = Boolean(identity.jellyfinItemId) || opts?.libraryOnly === true;
 
     // 1) Jellyfin library
     if (identity.jellyfinItemId || identity.tmdbId) {

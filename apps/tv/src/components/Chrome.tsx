@@ -247,22 +247,24 @@ export function Chrome({
             {menuOpen ? (
               <View style={styles.menu}>
                 <Text style={styles.menuName}>{username || "Profile"}</Text>
-                <Pressable
-                  style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
-                  focusable={canFocus}
-                  onPress={() => {
-                    setMenuOpen(false);
-                    navigation.navigate("Downloads");
-                  }}
-                >
-                  {(state) => (
-                    <Text
-                      style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
-                    >
-                      Cache
-                    </Text>
-                  )}
-                </Pressable>
+                {demo ? null : (
+                  <Pressable
+                    style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
+                    focusable={canFocus}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      navigation.navigate("Downloads");
+                    }}
+                  >
+                    {(state) => (
+                      <Text
+                        style={[styles.menuText, isTvFocused(state) && styles.menuTextFocused]}
+                      >
+                        Cache
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
                 <Pressable
                   style={(s) => [styles.menuItem, isTvFocused(s) && styles.menuItemFocused]}
                   focusable={canFocus}
