@@ -53,7 +53,7 @@ import {
 } from "@reclinarr/shared";
 import { Artwork } from "../Artwork.js";
 import { Button } from "../Button.js";
-import { isTvFocused, tvFocusHighlight } from "../focus.js";
+import { isTvFocused, tvFocusHighlight, usePreferredFocusOnce } from "../focus.js";
 import { colors } from "../theme.js";
 import type { LiveChannelRef } from "../screens/types.js";
 import { BufferingOverlay } from "./BufferingOverlay.js";
@@ -330,6 +330,9 @@ export function PlayerScreen({
     [isLive, reveal],
   );
 
+  // Remote keys only reach usePlayerRemote once some view holds focus.
+  const rootFocus = usePreferredFocusOnce(Platform.isTV);
+
   usePlayerRemote((eventType) => {
     if (eventType === "playPause" || eventType === "play" || eventType === "pause") {
       suppressChromeToggleAt.current = Date.now();
@@ -353,6 +356,10 @@ export function PlayerScreen({
       }
       suppressChromeToggleAt.current = Date.now();
       togglePause();
+      return;
+    }
+    if (eventType === "channelUp" || eventType === "channelDown") {
+      if (isLive) void zap(eventType === "channelUp" ? 1 : -1);
       return;
     }
     if (["up", "down", "left", "right"].includes(eventType)) {
@@ -1104,6 +1111,10 @@ export function PlayerScreen({
 
   return (
     <Pressable
+      ref={rootFocus.ref}
+      hasTVPreferredFocus={rootFocus.prefer}
+      onFocus={rootFocus.onFocus}
+      onBlur={rootFocus.onBlur}
       style={styles.root}
       {...(Platform.OS === "web" ? ({ "data-player-root": "1" } as Record<string, string>) : {})}
       onPress={() => {
