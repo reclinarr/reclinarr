@@ -109,7 +109,7 @@ The container runs as uid/gid 1000. If `/data` is a host bind mount owned by som
 
 Compose runs **Reclinarr only**. Point env vars at your existing Jellyfin / Seerr / Dispatcharr instances. The Docker image includes **nginx** (media plane), **ffmpeg** (HLS packager), and the API in one container.
 
-Live TV re-encodes H.264 with the GPU when ffmpeg can open one: VideoToolbox when the API runs on macOS, VAAPI for Intel/AMD when `/dev/dri` is visible, and NVENC or Quick Sync when that encoder is in the ffmpeg build. Otherwise it uses libx264. Set `RECLINARR_HWACCEL=off` to force software. Alpine's ffmpeg in the image includes VAAPI, and the image installs the VAAPI drivers. NVENC needs an ffmpeg built with `h264_nvenc` (`FFMPEG_PATH`). Docker on macOS runs a Linux VM, so VideoToolbox applies to a native `npm run dev` API process. On a Linux host, uncomment the `/dev/dri` device mount in the compose file.
+Live TV re-encodes H.264 with the GPU when ffmpeg can open one: VideoToolbox when the API runs on macOS, VAAPI for Intel/AMD when `/dev/dri` is visible, and NVENC or Quick Sync when that encoder is in the ffmpeg build. Otherwise it uses libx264. Set `RECLINARR_HWACCEL=off` to force software. Alpine's ffmpeg in the image includes VAAPI, and the amd64 image installs the Intel and AMD VAAPI drivers (the arm64 image leaves them out and encodes in software). NVENC needs an ffmpeg built with `h264_nvenc` (`FFMPEG_PATH`). Docker on macOS runs a Linux VM, so VideoToolbox applies to a native `npm run dev` API process. On a Linux host, uncomment the `/dev/dri` device mount in the compose file.
 
 Mount `/data/library` (or the `reclinarr-data` volume’s `library/` folder) into Jellyfin as a media library root so **Add to Library** promotions are scanned.
 
