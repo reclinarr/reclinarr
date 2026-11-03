@@ -1074,8 +1074,19 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     };
   }
 
+  /**
+   * Groups that hold at least one visible channel, with how many. Dispatcharr keeps every
+   * group an M3U ever had, which can be hundreds of empty ones.
+   */
   async listChannelGroups(): Promise<LiveChannelGroup[]> {
-    return this.groups.get();
+    const [groups, channels] = await Promise.all([this.groups.get(), this.loadAllChannels()]);
+    const counts = new Map<string, number>();
+    for (const channel of channels) {
+      if (channel.groupId) counts.set(channel.groupId, (counts.get(channel.groupId) ?? 0) + 1);
+    }
+    return groups
+      .filter((g) => counts.has(g.id))
+      .map((g) => ({ ...g, channelCount: counts.get(g.id) }));
   }
 
   private async fetchChannelGroups(): Promise<LiveChannelGroup[]> {
@@ -1370,7 +1381,7 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
       return data;
     };
 
-    const [groups, first] = await Promise.all([this.listChannelGroups(), fetchPage(1)]);
+    const [groups, first] = await Promise.all([this.groups.get(), fetchPage(1)]);
     const pages = [first.results ?? []];
     const count = first.count ?? pages[0]!.length;
     const totalPages = Math.min(CHANNEL_MAX_PAGES, Math.max(1, Math.ceil(count / CHANNEL_PAGE_SIZE)));
