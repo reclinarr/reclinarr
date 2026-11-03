@@ -92,7 +92,7 @@ type PreferredAction =
   | "NONE";
 ```
 
-UI verbs for consumers: **PLAY | CONTINUE | REQUEST | ADD TO LIBRARY** (never “Play Dispatcharr”).
+UI verbs for consumers: **PLAY | CONTINUE | REQUEST | CACHE** (never “Play Dispatcharr”).
 
 ## Providers and capabilities
 
@@ -163,7 +163,7 @@ DispatcharrProvider → AcquisitionSource → AcquisitionManager → DownloadTra
 | Mode | Behaviour |
 |------|-----------|
 | **CACHE** | Temporary acquire → release IPTV connection → local play → TTL/eviction |
-| **LIBRARY** | Permanent download → organise → Jellyfin path → scan |
+| **LIBRARY** | Keep: move a completed cache file into the Jellyfin library → scan |
 
 `DownloadTransport` owns HTTP range, resume, cancel, progress, and connection lifecycle. It must not live inside `DispatcharrProvider`.
 
@@ -175,14 +175,14 @@ With a single IPTV upstream slot, Play must not open a second IPTV stream for re
 2. The HLS packager writes an event playlist beside the growing file (video copy; audio copy or AAC).
 3. Resolve returns `buffering` until the first HLS segment exists, then `ready` with `/api/playback/cache/:id/hls/index.m3u8`.
 4. The player uses hls.js; seek is a segment request. When the download completes, the playlist gets `#EXT-X-ENDLIST`.
-5. UI shows cache TTL (“Cached · N days left”) and **Add to Library** next to Play (promote); no separate “download icons”.
+5. UI shows cache TTL (“Cached · N days left”). Promotion to the library (**Keep**) is API-only (`POST /api/acquisitions/:id/promote`); no client exposes it yet.
 
 ### Atomic promotion (Phase 5)
 
 Cache → Library must not re-download:
 
 1. Cache acquisition completes (or is in flight).
-2. User chooses Add to Library.
+2. User chooses Keep.
 3. Atomic move/rename into library layout, **or** upgrade in-flight acquisition mode from `cache` → `library`.
 4. Jellyfin library refresh/scan.
 

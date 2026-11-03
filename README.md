@@ -16,8 +16,7 @@ Reclinarr sits on top of **Jellyfin**, **Seerr**, and **Dispatcharr**. It does n
     Jellyfin           Seerr          Dispatcharr
    Library/Play     Discovery/Req      IPTV/Live/VOD
                           │                │
-                   Radarr/Sonarr   Reclinarr Acquisition
-                                      CACHE / LIBRARY
+                   Radarr/Sonarr   Reclinarr cache
 ```
 
 Logo source files are in [`assets/branding`](./assets/branding).
@@ -50,7 +49,7 @@ Logo source files are in [`assets/branding`](./assets/branding).
 
 | Phase | Status |
 |-------|--------|
-| 1–7 Product (API + clients) | Done — auth, Jellyfin, Seerr, Dispatcharr, acquisition, live, episodes |
+| 1–7 Product (API + clients) | Done — auth, Jellyfin, Seerr, Dispatcharr, IPTV cache, live, episodes |
 | 8 Android TV | Done — `apps/tv` |
 | 9 iOS / Android | Done — `apps/mobile` |
 | Web (RN Web) | Done — `apps/web` Expo + `react-native-web` |
@@ -111,7 +110,7 @@ Compose runs **Reclinarr only**. Point env vars at your existing Jellyfin / Seer
 
 Live TV re-encodes H.264 with the GPU when ffmpeg can open one: VideoToolbox when the API runs on macOS, VAAPI for Intel/AMD when `/dev/dri` is visible, and NVENC or Quick Sync when that encoder is in the ffmpeg build. Otherwise it uses libx264. Set `RECLINARR_HWACCEL=off` to force software. Alpine's ffmpeg in the image includes VAAPI, and the amd64 image installs the Intel and AMD VAAPI drivers (the arm64 image leaves them out and encodes in software). NVENC needs an ffmpeg built with `h264_nvenc` (`FFMPEG_PATH`). Docker on macOS runs a Linux VM, so VideoToolbox applies to a native `npm run dev` API process. On a Linux host, uncomment the `/dev/dri` device mount in the compose file.
 
-Mount `/data/library` (or the `reclinarr-data` volume’s `library/` folder) into Jellyfin as a media library root so **Add to Library** promotions are scanned.
+IPTV movies and episodes are cached on the server while you watch, so you can seek and resume without holding one of your provider's connections. A cached file is deleted a day after you finish it, or after 7 days idle (see `RECLINARR_CACHE_*` below).
 
 ## Configuration
 
@@ -120,7 +119,7 @@ See [`.env.example`](./.env.example).
 | Variable | Purpose |
 |----------|---------|
 | `RECLINARR_PORT` | API listen port |
-| `RECLINARR_CACHE_MAX_BYTES` | Max size of CACHE acquisitions (default 50 GiB) |
+| `RECLINARR_CACHE_MAX_BYTES` | Max size of the IPTV cache (default 50 GiB) |
 | `RECLINARR_CACHE_TTL_MS` | Max time an idle CACHE file is kept (default 7 days) |
 | `RECLINARR_CACHE_WATCHED_TTL_MS` | Delete a CACHE file this long after it was watched past 95% (default 24 hours). Playing the next episode frees earlier watched episodes immediately |
 | `RECLINARR_IPTV_MAX_CONNECTIONS` | Concurrent IPTV upstreams (default 3) |
@@ -163,7 +162,7 @@ make test-live
 ```
 
 Primary validation targets are web, the iOS Simulator, and the Google TV emulator.
-IPTV on-demand playback downloads into the server cache and starts once enough HLS
+IPTV on-demand playback caches on the server and starts once enough HLS
 segments are available; locally ready titles play from Jellyfin or the existing cache.
 
 Run the native Metro servers on separate ports when testing both emulators:
