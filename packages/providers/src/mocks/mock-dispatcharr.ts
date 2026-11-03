@@ -116,7 +116,10 @@ export class MockDispatcharrProvider implements VodProvider, LiveTvProvider {
   }
 
   async listChannelGroups(): Promise<LiveChannelGroup[]> {
-    return mockGroups;
+    return mockGroups.map((g) => ({
+      ...g,
+      channelCount: mockChannels.filter((c) => c.groupId === g.id).length,
+    }));
   }
 
   async listChannels(opts?: {

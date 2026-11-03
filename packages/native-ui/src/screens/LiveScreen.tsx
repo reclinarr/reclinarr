@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   FlatList,
   Platform,
@@ -20,7 +20,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { LiveChannel, LiveNowNext } from "@reclinarr/shared";
+import { displayGroupName, type LiveChannel, type LiveNowNext } from "@reclinarr/shared";
 import {
   liveChannels,
   liveGroups,
@@ -38,7 +38,7 @@ import { colors } from "../theme.js";
 import { webBg } from "../webStyle.js";
 import type { ScreenChromeProps } from "./types.js";
 
-type FilterItem = { id: string; label: string };
+type FilterItem = { id: string; label: string; count?: number };
 
 type LiveSort = "number" | "name" | "name_desc";
 type ViewMode = "list" | "card";
@@ -68,6 +68,51 @@ function combineNow(results: NowQueryResult[]): Map<string, LiveNowNext> {
 }
 
 const channelKey = (item: LiveChannel) => item.uuid;
+const filterKey = (item: FilterItem) => item.id || "all";
+
+/** TV guide layout: group rail on the left, channel list filling the rest. */
+const RAIL_W = 280;
+const RAIL_ROW_H = 48;
+
+/**
+ * D-pad focus does not scroll a list, so scroll it to keep the focused row in view.
+ * The target comes from the row index alone, and the jump is not animated: a press
+ * that lands mid-animation makes Android search for the next row among moving views
+ * and focus snaps back several rows.
+ */
+function useKeepFocusedRowInView<T>(
+  listRef: RefObject<FlatList<T> | null>,
+  { enabled, rowH, columns, viewportH }: {
+    enabled: boolean;
+    rowH: number;
+    columns: number;
+    viewportH: number;
+  },
+) {
+  /** Where the list was last scrolled to; on TV only this code scrolls it. */
+  const scrollY = useRef(0);
+  const keepInView = useCallback(
+    (index: number) => {
+      if (!enabled) return;
+      const top = Math.floor(index / columns) * rowH;
+      // Show a row of context on each side when it fits; card rows on a TV barely fit once.
+      const margin = Math.max(0, Math.min(rowH, Math.floor((viewportH - rowH) / 2)));
+      const viewTop = scrollY.current;
+      let next = viewTop;
+      if (top < viewTop + margin) next = Math.max(0, top - margin);
+      else if (top + rowH + margin > viewTop + viewportH) next = top + rowH + margin - viewportH;
+      if (next === viewTop) return;
+      scrollY.current = next;
+      listRef.current?.scrollToOffset({ offset: next, animated: false });
+    },
+    [enabled, columns, rowH, viewportH, listRef],
+  );
+  const scrollToTop = useCallback(() => {
+    scrollY.current = 0;
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [listRef]);
+  return { keepInView, scrollToTop };
+}
 
 export function LiveScreen({
   nav,
@@ -82,28 +127,24 @@ export function LiveScreen({
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [sort, setSort] = useState<LiveSort>("number");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [viewModeChoice, setViewMode] = useState<ViewMode>("list");
+  // Card rows barely fit once on a TV screen.
+  const viewMode: ViewMode = tv ? "list" : viewModeChoice;
   const searchInputRef = useRef<TextInput>(null);
-  const filterScrollRef = useRef<ScrollView>(null);
   const channelListRef = useRef<FlatList<LiveChannel>>(null);
-  /** Where the list was last scrolled to; on TV only this code scrolls it. */
-  const channelScrollY = useRef(0);
-  const filterOffsets = useRef<Record<string, number>>({});
-  // Android TV Yoga often collapses flex:1 FlatLists under the filter row to 0 height.
-  // Pin an explicit viewport so channels actually paint and can scroll with focus.
-  const channelListH = Math.max(280, Math.round(windowH - (tv ? 430 : 360)));
+  const railListRef = useRef<FlatList<FilterItem>>(null);
+  // Android TV Yoga often collapses flex:1 FlatLists to 0 height, so lists get an explicit
+  // height: measured from a plain flex:1 wrapper on TV, estimated elsewhere.
+  const [tvListH, setTvListH] = useState(0);
+  const [railListH, setRailListH] = useState(0);
+  const channelListH = tv
+    ? tvListH || Math.max(280, windowH - 140)
+    : Math.max(280, Math.round(windowH - 360));
   // iOS: AVPlayer cannot play MPEG-TS. Web: mpegts.js drifts A/V on IPTV PCRs.
   const preferHls = Platform.OS === "ios" || Platform.OS === "web";
 
   const groups = useQuery({ queryKey: ["live", "groups"], queryFn: () => liveGroups() });
-  const filterItems = useMemo<FilterItem[]>(
-    () => [
-      { id: "", label: "All" },
-      { id: "favourites", label: "Favourites" },
-      ...(groups.data?.items ?? []).map((g) => ({ id: g.id, label: g.name })),
-    ],
-    [groups.data?.items],
-  );
+  const groupItems = groups.data?.items;
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -151,6 +192,23 @@ export function LiveScreen({
     [toggledFavourites, serverFavourites],
   );
 
+  const filterItems = useMemo<FilterItem[]>(() => {
+    const list = groupItems ?? [];
+    return [
+      {
+        id: "",
+        label: "All",
+        count: tv ? list.reduce((n, g) => n + (g.channelCount ?? 0), 0) || undefined : undefined,
+      },
+      { id: "favourites", label: "Favourites", count: tv ? favourites.size : undefined },
+      ...list.map((g) => ({
+        id: g.id,
+        label: tv ? displayGroupName(g.name) : g.name,
+        count: tv ? g.channelCount : undefined,
+      })),
+    ];
+  }, [groupItems, favourites, tv]);
+
   const playMutation = useMutation({
     mutationFn: (uuid: string) => playLiveChannel(uuid, { hls: preferHls }),
     onSuccess: (data, uuid) => {
@@ -186,36 +244,23 @@ export function LiveScreen({
   const columns = viewMode === "card" ? 2 : 1;
   const rowH = viewMode === "card" ? CARD_ROW_H : LIST_ROW_H;
 
+  const { keepInView, scrollToTop } = useKeepFocusedRowInView(channelListRef, {
+    enabled: tv,
+    rowH,
+    columns,
+    viewportH: channelListH,
+  });
+  const rail = useKeepFocusedRowInView(railListRef, {
+    enabled: tv,
+    rowH: RAIL_ROW_H,
+    columns: 1,
+    viewportH: railListH,
+  });
+
   // A new filter, search, sort or view starts at the top.
   useEffect(() => {
-    channelScrollY.current = 0;
-    channelListRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [groupId, query, sort, viewMode]);
-
-  /**
-   * Keep the focused row inside the list viewport (D-pad focus does not scroll it).
-   * The target comes from the row index alone, and the jump is not animated: a press
-   * that lands mid-animation makes Android search for the next row among moving views
-   * and focus snaps back several rows.
-   */
-  const keepInView = useCallback(
-    (index: number) => {
-      if (!tv) return;
-      const top = Math.floor(index / columns) * rowH;
-      // Show a row of context on each side when it fits; card rows on a TV barely fit once.
-      const margin = Math.max(0, Math.min(rowH, Math.floor((channelListH - rowH) / 2)));
-      const viewTop = channelScrollY.current;
-      let next = viewTop;
-      if (top < viewTop + margin) next = Math.max(0, top - margin);
-      else if (top + rowH + margin > viewTop + channelListH) {
-        next = top + rowH + margin - channelListH;
-      }
-      if (next === viewTop) return;
-      channelScrollY.current = next;
-      channelListRef.current?.scrollToOffset({ offset: next, animated: false });
-    },
-    [tv, columns, rowH, channelListH],
-  );
+    scrollToTop();
+  }, [groupId, query, sort, viewMode, scrollToTop]);
 
   const play = playMutation.mutate;
   const toggleFavourite = favMutation.mutate;
@@ -231,6 +276,9 @@ export function LiveScreen({
           favourite={favourites.has(item.uuid)}
           playEnabled={playEnabled}
           showFocusRing={tv}
+          // On TV, OK on the row plays it, and empty guide text is mostly noise.
+          showPlayButton={!tv}
+          showEmptyGuide={!tv}
           onPlay={play}
           onFav={toggleFavourite}
           onFocusIndex={keepInView}
@@ -238,6 +286,22 @@ export function LiveScreen({
       );
     },
     [viewMode, nowMap, favourites, playEnabled, tv, play, toggleFavourite, keepInView],
+  );
+  const renderRailItem = useCallback<ListRenderItem<FilterItem>>(
+    ({ item, index }) => (
+      <RailItem
+        item={item}
+        index={index}
+        active={groupId === item.id}
+        onSelect={setGroupId}
+        onFocusIndex={rail.keepInView}
+      />
+    ),
+    [groupId, rail.keepInView],
+  );
+  const getRailItemLayout = useCallback(
+    (_: unknown, index: number) => ({ length: RAIL_ROW_H, offset: RAIL_ROW_H * index, index }),
+    [],
   );
   const getItemLayout = useCallback(
     (_: unknown, index: number) => ({ length: rowH, offset: rowH * index, index }),
@@ -247,177 +311,186 @@ export function LiveScreen({
     if (channels.hasNextPage && !channels.isFetchingNextPage) void channels.fetchNextPage();
   }, [channels]);
 
+  const searchBox = (
+    <Pressable
+      onPress={() => searchInputRef.current?.focus()}
+      onFocus={tv ? () => setSearchFocused(true) : undefined}
+      onBlur={tv ? () => setSearchFocused(false) : undefined}
+      style={(s) => [
+        styles.searchWrap,
+        tv && styles.searchWrapTv,
+        tv && (searchFocused || isTvFocused(s)) && styles.searchWrapFocused,
+      ]}
+    >
+      <TextInput
+        ref={searchInputRef}
+        style={[
+          styles.search,
+          tv && styles.searchTv,
+          tv && searchFocused && styles.searchFocused,
+        ]}
+        focusable={!tv}
+        showSoftInputOnFocus
+        onFocus={tv ? () => setSearchFocused(true) : undefined}
+        onBlur={tv ? () => setSearchFocused(false) : undefined}
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search channels…"
+        placeholderTextColor={searchFocused ? "#444" : colors.muted}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+    </Pressable>
+  );
+  const status = (
+    <>
+      {channels.isError ? (
+        <Text style={styles.error}>{(channels.error as Error).message}</Text>
+      ) : null}
+      {playMutation.isPending ? (
+        <Text style={styles.starting}>Starting live stream…</Text>
+      ) : null}
+      {playMutation.isError ? (
+        <Text style={styles.error}>{(playMutation.error as Error).message}</Text>
+      ) : null}
+    </>
+  );
+  const channelList = (
+    <FlatList
+      // FlatList cannot change numColumns in place.
+      key={viewMode}
+      ref={channelListRef}
+      style={[styles.channelListBox, { height: channelListH }]}
+      data={items}
+      keyExtractor={channelKey}
+      renderItem={renderChannel}
+      numColumns={columns}
+      columnWrapperStyle={columns > 1 ? styles.cardRow : undefined}
+      getItemLayout={getItemLayout}
+      onEndReached={loadMore}
+      onEndReachedThreshold={1.5}
+      initialNumToRender={12}
+      maxToRenderPerBatch={12}
+      windowSize={7}
+      // Detached off-screen rows cannot take D-pad focus, so moving down would stop.
+      removeClippedSubviews={false}
+      ListEmptyComponent={
+        channels.isPending ? (
+          <ChannelListSkeleton rows={8} />
+        ) : channels.isError ? null : (
+          <Text style={styles.empty}>No channels in this group.</Text>
+        )
+      }
+      ListFooterComponent={
+        channels.isFetchingNextPage ? (
+          <Text style={styles.loadingMore}>Loading more channels…</Text>
+        ) : null
+      }
+    />
+  );
+
+  if (tv) {
+    return (
+      <View style={styles.page}>
+        {header}
+        <View style={styles.tvBody}>
+          <View style={styles.rail}>
+            {searchBox}
+            <View
+              style={styles.fill}
+              onLayout={(e) => setRailListH(Math.floor(e.nativeEvent.layout.height))}
+            >
+              <FlatList
+                ref={railListRef}
+                style={{ height: railListH }}
+                data={filterItems}
+                keyExtractor={filterKey}
+                renderItem={renderRailItem}
+                getItemLayout={getRailItemLayout}
+                removeClippedSubviews={false}
+              />
+            </View>
+            <Button
+              label={`Sort: ${SORT_LABELS[sort]}`}
+              variant="ghost"
+              onPress={cycleSort}
+              style={styles.railSort}
+              showFocusRing
+            />
+          </View>
+          <View style={styles.tvMain}>
+            {status}
+            <View
+              style={styles.fill}
+              onLayout={(e) => setTvListH(Math.floor(e.nativeEvent.layout.height))}
+            >
+              {channelList}
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.page}>
       {header}
       <View style={styles.bodyPad}>
-        <Pressable
-          onPress={() => searchInputRef.current?.focus()}
-          onFocus={tv ? () => setSearchFocused(true) : undefined}
-          onBlur={tv ? () => setSearchFocused(false) : undefined}
-          style={(s) => [
-            styles.searchWrap,
-            tv && styles.searchWrapTv,
-            tv && (searchFocused || isTvFocused(s)) && styles.searchWrapFocused,
-          ]}
-        >
-          <TextInput
-            ref={searchInputRef}
-            style={[
-              styles.search,
-              tv && styles.searchTv,
-              tv && searchFocused && styles.searchFocused,
-            ]}
-            focusable={!tv}
-            showSoftInputOnFocus
-            onFocus={tv ? () => setSearchFocused(true) : undefined}
-            onBlur={tv ? () => setSearchFocused(false) : undefined}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search channels…"
-            placeholderTextColor={searchFocused ? "#444" : colors.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </Pressable>
+        {searchBox}
 
-        <View style={[styles.toolbar, tv && styles.toolbarTv]}>
+        <View style={styles.toolbar}>
           <Button
             label={SORT_LABELS[sort]}
             variant="ghost"
             onPress={cycleSort}
             style={styles.toolbarBtn}
-            showFocusRing={tv}
           />
           <View style={styles.viewToggle}>
             <Pressable
               onPress={() => setViewMode("list")}
-              style={(s) => [
-                styles.viewBtn,
-                viewMode === "list" && styles.viewBtnOn,
-                tv &&
-                  isTvFocused(s) &&
-                  (viewMode === "list" ? styles.viewBtnFocusedOn : styles.viewBtnFocused),
-              ]}
+              style={[styles.viewBtn, viewMode === "list" && styles.viewBtnOn]}
               accessibilityRole="button"
               accessibilityState={{ selected: viewMode === "list" }}
               accessibilityLabel="List view"
             >
-              {(s) => (
-                <Text
-                  style={[
-                    styles.viewBtnLabel,
-                    viewMode === "list" && styles.viewBtnLabelOn,
-                    tv && isTvFocused(s) && viewMode !== "list" && styles.viewBtnLabelFocused,
-                  ]}
-                >
-                  List
-                </Text>
-              )}
+              <Text style={[styles.viewBtnLabel, viewMode === "list" && styles.viewBtnLabelOn]}>
+                List
+              </Text>
             </Pressable>
             <Pressable
               onPress={() => setViewMode("card")}
-              style={(s) => [
-                styles.viewBtn,
-                viewMode === "card" && styles.viewBtnOn,
-                tv &&
-                  isTvFocused(s) &&
-                  (viewMode === "card" ? styles.viewBtnFocusedOn : styles.viewBtnFocused),
-              ]}
+              style={[styles.viewBtn, viewMode === "card" && styles.viewBtnOn]}
               accessibilityRole="button"
               accessibilityState={{ selected: viewMode === "card" }}
               accessibilityLabel="Card view"
             >
-              {(s) => (
-                <Text
-                  style={[
-                    styles.viewBtnLabel,
-                    viewMode === "card" && styles.viewBtnLabelOn,
-                    tv && isTvFocused(s) && viewMode !== "card" && styles.viewBtnLabelFocused,
-                  ]}
-                >
-                  Card
-                </Text>
-              )}
+              <Text style={[styles.viewBtnLabel, viewMode === "card" && styles.viewBtnLabelOn]}>
+                Card
+              </Text>
             </Pressable>
           </View>
         </View>
 
         <ScrollView
-          ref={filterScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={[styles.filtersScroll, tv && styles.filtersScrollTv]}
-          contentContainerStyle={[styles.filters, tv && styles.filtersTv]}
+          style={styles.filtersScroll}
+          contentContainerStyle={styles.filters}
         >
           {filterItems.map((item) => (
             <FilterChip
-              key={item.id || "all"}
+              key={filterKey(item)}
               label={item.label}
               active={groupId === item.id}
-              compact={tv}
-              onPress={() => setGroupId(item.id as string | "favourites" | "")}
-              showFocusRing={tv}
-              onLayout={(x) => {
-                filterOffsets.current[item.id || "all"] = x;
-              }}
-              onFocus={
-                tv
-                  ? () => {
-                      const x = filterOffsets.current[item.id || "all"] ?? 0;
-                      filterScrollRef.current?.scrollTo({
-                        x: Math.max(0, x - 48),
-                        animated: true,
-                      });
-                    }
-                  : undefined
-              }
+              onPress={() => setGroupId(item.id)}
             />
           ))}
         </ScrollView>
 
-        {channels.isError ? (
-          <Text style={styles.error}>{(channels.error as Error).message}</Text>
-        ) : null}
-        {playMutation.isPending ? (
-          <Text style={styles.starting}>Starting live stream…</Text>
-        ) : null}
-        {playMutation.isError ? (
-          <Text style={styles.error}>{(playMutation.error as Error).message}</Text>
-        ) : null}
+        {status}
       </View>
 
-      <FlatList
-        // FlatList cannot change numColumns in place.
-        key={viewMode}
-        ref={channelListRef}
-        style={[styles.channelListBox, { height: channelListH }]}
-        data={items}
-        keyExtractor={channelKey}
-        renderItem={renderChannel}
-        numColumns={columns}
-        columnWrapperStyle={columns > 1 ? styles.cardRow : undefined}
-        getItemLayout={getItemLayout}
-        onEndReached={loadMore}
-        onEndReachedThreshold={1.5}
-        initialNumToRender={12}
-        maxToRenderPerBatch={12}
-        windowSize={7}
-        // Detached off-screen rows cannot take D-pad focus, so moving down would stop.
-        removeClippedSubviews={false}
-        ListEmptyComponent={
-          channels.isPending ? (
-            <ChannelListSkeleton rows={8} />
-          ) : channels.isError ? null : (
-            <Text style={styles.empty}>No channels in this group.</Text>
-          )
-        }
-        ListFooterComponent={
-          channels.isFetchingNextPage ? (
-            <Text style={styles.loadingMore}>Loading more channels…</Text>
-          ) : null
-        }
-      />
+      {channelList}
     </View>
   );
 }
@@ -425,49 +498,79 @@ export function LiveScreen({
 function FilterChip({
   label,
   active,
-  compact = false,
   onPress,
-  showFocusRing = false,
-  onFocus,
-  onLayout,
 }: {
   label: string;
   active: boolean;
-  compact?: boolean;
   onPress: () => void;
-  showFocusRing?: boolean;
-  onFocus?: () => void;
-  onLayout?: (x: number) => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      onFocus={onFocus}
-      onLayout={(e) => onLayout?.(e.nativeEvent.layout.x)}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={(state) => [
-        styles.filterChip,
-        compact && styles.filterChipCompact,
-        active && styles.filterChipActive,
-        showFocusRing && isTvFocused(state) && styles.filterChipFocused,
-      ]}
+      style={[styles.filterChip, active && styles.filterChipActive]}
     >
-      {(state) => (
-        <Text
-          style={[
-            styles.filterChipLabel,
-            active && styles.filterChipLabelActive,
-            showFocusRing && isTvFocused(state) && styles.filterChipLabelFocused,
-          ]}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      )}
+      <Text
+        style={[styles.filterChipLabel, active && styles.filterChipLabelActive]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
+
+const RailItem = memo(function RailItem({
+  item,
+  index,
+  active,
+  onSelect,
+  onFocusIndex,
+}: {
+  item: FilterItem;
+  index: number;
+  active: boolean;
+  onSelect: (id: string) => void;
+  onFocusIndex: (index: number) => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => onSelect(item.id)}
+      onFocus={() => onFocusIndex(index)}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      style={(state) => [
+        styles.railItem,
+        active && styles.railItemActive,
+        isTvFocused(state) && styles.railItemFocused,
+      ]}
+    >
+      {(state) => {
+        const focused = isTvFocused(state);
+        return (
+          <>
+            <Text
+              style={[
+                styles.railLabel,
+                active && styles.railLabelActive,
+                focused && styles.railLabelFocused,
+              ]}
+              numberOfLines={1}
+            >
+              {item.label}
+            </Text>
+            {item.count != null ? (
+              <Text style={[styles.railCount, focused && styles.railLabelFocused]}>
+                {item.count}
+              </Text>
+            ) : null}
+          </>
+        );
+      }}
+    </Pressable>
+  );
+});
 
 function ChannelLogo({
   channel,
@@ -542,6 +645,9 @@ type ChannelItemProps = {
   favourite: boolean;
   playEnabled: boolean;
   showFocusRing?: boolean;
+  /** List rows only. */
+  showPlayButton?: boolean;
+  showEmptyGuide?: boolean;
   onPlay: (uuid: string) => void;
   onFav: (uuid: string) => void;
   onFocusIndex: (index: number) => void;
@@ -554,12 +660,15 @@ const ChannelRow = memo(function ChannelRow({
   favourite,
   playEnabled,
   showFocusRing = false,
+  showPlayButton = true,
+  showEmptyGuide = true,
   onPlay,
   onFav,
   onFocusIndex,
 }: ChannelItemProps) {
   const play = () => onPlay(channel.uuid);
   const fireFocus = () => onFocusIndex(index);
+  const nowTitle = now?.now?.title ?? (showEmptyGuide ? "No guide data" : null);
   return (
     <View style={styles.row}>
       <Text style={styles.num} numberOfLines={1} adjustsFontSizeToFit>{channel.number ?? ""}</Text>
@@ -577,9 +686,11 @@ const ChannelRow = memo(function ChannelRow({
         <Text style={styles.name} numberOfLines={1}>
           {channel.name}
         </Text>
-        <Text style={styles.now} numberOfLines={1}>
-          {now?.now?.title ?? "No guide data"}
-        </Text>
+        {nowTitle ? (
+          <Text style={styles.now} numberOfLines={1}>
+            {nowTitle}
+          </Text>
+        ) : null}
       </Pressable>
       <Pressable
         onPress={() => onFav(channel.uuid)}
@@ -596,13 +707,15 @@ const ChannelRow = memo(function ChannelRow({
           {favourite ? "★" : "☆"}
         </Text>
       </Pressable>
-      <PlayChannelButton
-        enabled={playEnabled}
-        onPress={play}
-        onFocus={fireFocus}
-        compact
-        showFocusRing={showFocusRing}
-      />
+      {showPlayButton ? (
+        <PlayChannelButton
+          enabled={playEnabled}
+          onPress={play}
+          onFocus={fireFocus}
+          compact
+          showFocusRing={showFocusRing}
+        />
+      ) : null}
     </View>
   );
 });
@@ -663,6 +776,27 @@ const ChannelCard = memo(function ChannelCard({
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: webBg },
+  fill: { flex: 1 },
+  tvBody: { flex: 1, flexDirection: "row", gap: 8, paddingLeft: 16, paddingBottom: 12 },
+  rail: { width: RAIL_W },
+  railSort: { marginTop: 8 },
+  tvMain: { flex: 1, minWidth: 0 },
+  railItem: {
+    height: RAIL_ROW_H - 4,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "transparent",
+  },
+  railItemActive: { borderLeftColor: colors.accent, backgroundColor: "rgba(255,255,255,0.08)" },
+  railItemFocused: { backgroundColor: colors.focus },
+  railLabel: { flex: 1, color: colors.muted, fontSize: 15, fontWeight: "600" },
+  railLabelActive: { color: colors.text },
+  railLabelFocused: { color: colors.bg },
+  railCount: { color: colors.muted, fontSize: 13, marginLeft: 8 },
   bodyPad: { paddingHorizontal: 16 },
   searchWrap: { marginBottom: 10 },
   searchWrapTv: {
@@ -691,7 +825,6 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 10,
   },
-  toolbarTv: { marginBottom: 6 },
   toolbarBtn: { paddingVertical: 8, paddingHorizontal: 12 },
   viewToggle: {
     flexDirection: "row",
@@ -708,24 +841,12 @@ const styles = StyleSheet.create({
   viewBtnOn: {
     backgroundColor: colors.text,
   },
-  viewBtnFocused: {
-    borderColor: colors.focus,
-    backgroundColor: colors.focus,
-    transform: [{ scale: 1.06 }],
-  },
-  viewBtnFocusedOn: {
-    borderColor: colors.bg,
-    transform: [{ scale: 1.06 }],
-  },
   viewBtnLabel: {
     color: colors.muted,
     fontSize: 13,
     fontWeight: "600",
   },
   viewBtnLabelOn: {
-    color: colors.bg,
-  },
-  viewBtnLabelFocused: {
     color: colors.bg,
   },
   // Single horizontal row — never wrap; do not grow (must not crush the channel list).
@@ -735,7 +856,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     maxHeight: 48,
   },
-  filtersScrollTv: { marginBottom: 6 },
   filters: {
     flexDirection: "row",
     flexWrap: "nowrap",
@@ -744,7 +864,6 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     minHeight: 44,
   },
-  filtersTv: { minHeight: 38 },
   channelListBox: { paddingHorizontal: 16 },
   cardRow: { gap: CARD_GAP, marginBottom: CARD_GAP },
   loadingMore: { color: colors.muted, fontSize: 13, paddingVertical: 16, textAlign: "center" },
@@ -761,15 +880,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     marginRight: 0,
   },
-  filterChipCompact: { paddingVertical: 6, minHeight: 34 },
   filterChipActive: {
     backgroundColor: "rgba(255,255,255,0.16)",
     borderColor: "rgba(255,255,255,0.4)",
-  },
-  filterChipFocused: {
-    borderColor: colors.bg,
-    backgroundColor: colors.focus,
-    transform: [{ scale: 1.06 }],
   },
   filterChipLabel: {
     color: colors.text,
@@ -779,9 +892,6 @@ const styles = StyleSheet.create({
   },
   filterChipLabelActive: {
     color: colors.text,
-  },
-  filterChipLabelFocused: {
-    color: colors.bg,
   },
   starting: { color: colors.muted, marginBottom: 8, fontSize: 13 },
   error: { color: colors.danger, marginBottom: 8 },

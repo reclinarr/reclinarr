@@ -30,7 +30,11 @@ function fakeDispatcharr(
   const fetchImpl: typeof fetch = async (input) => {
     const url = new URL(String(input));
     if (url.pathname === "/api/channels/groups/") {
-      return jsonResponse([{ id: 1, name: "Entertainment" }]);
+      return jsonResponse([
+        { id: 1, name: "Entertainment" },
+        { id: 2, name: "Empty" },
+        { id: 3, name: "News" },
+      ]);
     }
     if (url.pathname === "/api/channels/channels/") {
       if (opts.failChannels?.()) return jsonResponse({ detail: "boom" }, 500);
@@ -43,7 +47,10 @@ function fakeDispatcharr(
       inFlight -= 1;
       const start = (page - 1) * 100;
       const results = Array.from({ length: Math.max(0, Math.min(100, total - start)) }, (_, i) =>
-        channel(start + i + 1, start + i + 1 === 5 ? { hidden_from_output: true } : {}),
+        channel(start + i + 1, {
+          ...(start + i + 1 === 5 ? { hidden_from_output: true } : {}),
+          ...((start + i + 1) % 10 === 0 ? { channel_group_id: 3 } : {}),
+        }),
       );
       return jsonResponse({ count: total, results });
     }
@@ -118,6 +125,15 @@ describe("Dispatcharr channel lineup", () => {
     await vi.waitFor(() => expect(pageRequests.length).toBeGreaterThan(2));
     release?.();
     await vi.waitFor(() => expect(pageRequests).toHaveLength(4));
+  });
+
+  it("lists only groups that hold visible channels, with their counts", async () => {
+    const { provider } = fakeDispatcharr(100);
+
+    await expect(provider.listChannelGroups()).resolves.toEqual([
+      { id: "1", name: "Entertainment", channelCount: 89 },
+      { id: "3", name: "News", channelCount: 10 },
+    ]);
   });
 
   it("does not cache a failed first load", async () => {
