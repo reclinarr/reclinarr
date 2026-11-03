@@ -2,7 +2,7 @@
   "expo": {
     "name": "Reclinarr",
     "slug": "reclinarr-tv",
-    "version": "0.1.0",
+    "version": "0.2.0-rc.1",
     "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
     ],
     "android": {
       "package": "app.reclinarr.tv",
-      "versionCode": 10099,
+      "versionCode": 20001,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#11141b"
