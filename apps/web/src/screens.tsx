@@ -98,9 +98,10 @@ export function SearchScreen({ username }: { username: string }) {
 
 export function LiveScreen({ username }: { username: string }) {
   const nav = useScreenNav();
+  const layout = useWebLayout();
   return (
     <WebChrome username={username}>
-      <SharedLive nav={nav} header={<PageHeading title="Live TV" />} />
+      <SharedLive nav={nav} header={<PageHeading title="Live TV" />} insetX={layout.pageX} />
     </WebChrome>
   );
 }

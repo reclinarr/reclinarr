@@ -3,13 +3,13 @@ import {
   FlatList,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
   useWindowDimensions,
   type ListRenderItem,
+  type PressableStateCallbackType,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -30,9 +30,7 @@ import {
   trackFeature,
 } from "@reclinarr/client";
 import { Artwork } from "../Artwork.js";
-import { Button } from "../Button.js";
 import { isTvFocused, tvFocusHighlight } from "../focus.js";
-import { PlayIcon } from "../icons.js";
 import { ChannelListSkeleton } from "../Skeleton.js";
 import { colors } from "../theme.js";
 import { webBg } from "../webStyle.js";
@@ -41,7 +39,6 @@ import type { ScreenChromeProps } from "./types.js";
 type FilterItem = { id: string; label: string; count?: number };
 
 type LiveSort = "number" | "name" | "name_desc";
-type ViewMode = "list" | "card";
 
 const SORT_CYCLE: LiveSort[] = ["number", "name", "name_desc"];
 const SORT_LABELS: Record<LiveSort, string> = {
@@ -54,8 +51,15 @@ const PAGE_SIZE = 60;
 const SEARCH_DEBOUNCE_MS = 300;
 /** Fixed row heights let the list place a focused row by index, without measuring it. */
 const LIST_ROW_H = 64;
-const CARD_ROW_H = 250;
-const CARD_GAP = 10;
+const RAIL_ROW_H = 48;
+/** Guide layout: group rail on the left, channel list filling the rest. */
+const RAIL_W_TV = 280;
+const RAIL_W = 260;
+/** Below this width the rail folds into a panel opened from a group button. */
+const COLLAPSE_RAIL_BELOW_W = 720;
+
+/** RN-web adds `hovered` to the pressable state. */
+type PressState = PressableStateCallbackType & { hovered?: boolean };
 
 type NowQueryResult = { data?: { items: LiveNowNext[] } };
 
@@ -70,10 +74,6 @@ function combineNow(results: NowQueryResult[]): Map<string, LiveNowNext> {
 const channelKey = (item: LiveChannel) => item.uuid;
 const filterKey = (item: FilterItem) => item.id || "all";
 
-/** TV guide layout: group rail on the left, channel list filling the rest. */
-const RAIL_W = 280;
-const RAIL_ROW_H = 48;
-
 /**
  * D-pad focus does not scroll a list, so scroll it to keep the focused row in view.
  * The target comes from the row index alone, and the jump is not animated: a press
@@ -82,20 +82,15 @@ const RAIL_ROW_H = 48;
  */
 function useKeepFocusedRowInView<T>(
   listRef: RefObject<FlatList<T> | null>,
-  { enabled, rowH, columns, viewportH }: {
-    enabled: boolean;
-    rowH: number;
-    columns: number;
-    viewportH: number;
-  },
+  { enabled, rowH, viewportH }: { enabled: boolean; rowH: number; viewportH: number },
 ) {
   /** Where the list was last scrolled to; on TV only this code scrolls it. */
   const scrollY = useRef(0);
   const keepInView = useCallback(
     (index: number) => {
       if (!enabled) return;
-      const top = Math.floor(index / columns) * rowH;
-      // Show a row of context on each side when it fits; card rows on a TV barely fit once.
+      const top = index * rowH;
+      // Show a row of context on each side when it fits.
       const margin = Math.max(0, Math.min(rowH, Math.floor((viewportH - rowH) / 2)));
       const viewTop = scrollY.current;
       let next = viewTop;
@@ -105,7 +100,7 @@ function useKeepFocusedRowInView<T>(
       scrollY.current = next;
       listRef.current?.scrollToOffset({ offset: next, animated: false });
     },
-    [enabled, columns, rowH, viewportH, listRef],
+    [enabled, rowH, viewportH, listRef],
   );
   const scrollToTop = useCallback(() => {
     scrollY.current = 0;
@@ -118,30 +113,35 @@ export function LiveScreen({
   nav,
   header,
   focusMode = "touch",
-}: Pick<ScreenChromeProps, "nav" | "header" | "focusMode">) {
+  insetX = 16,
+}: Pick<ScreenChromeProps, "nav" | "header" | "focusMode"> & {
+  /** Page margin, so the rail and list line up with the header's title. */
+  insetX?: number;
+}) {
   const tv = focusMode === "tv";
   const qc = useQueryClient();
-  const { height: windowH } = useWindowDimensions();
+  const { width: windowW, height: windowH } = useWindowDimensions();
+  const collapsible = !tv && windowW < COLLAPSE_RAIL_BELOW_W;
+  const [railOpen, setRailOpen] = useState(false);
   const [groupId, setGroupId] = useState<string | "favourites" | "">("");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [sort, setSort] = useState<LiveSort>("number");
-  const [viewModeChoice, setViewMode] = useState<ViewMode>("list");
-  // Card rows barely fit once on a TV screen.
-  const viewMode: ViewMode = tv ? "list" : viewModeChoice;
   const searchInputRef = useRef<TextInput>(null);
   const channelListRef = useRef<FlatList<LiveChannel>>(null);
   const railListRef = useRef<FlatList<FilterItem>>(null);
   // Android TV Yoga often collapses flex:1 FlatLists to 0 height, so lists get an explicit
-  // height: measured from a plain flex:1 wrapper on TV, estimated elsewhere.
-  const [tvListH, setTvListH] = useState(0);
+  // height measured from a plain flex:1 wrapper.
+  const [measuredListH, setMeasuredListH] = useState(0);
   const [railListH, setRailListH] = useState(0);
-  const channelListH = tv
-    ? tvListH || Math.max(280, windowH - 140)
-    : Math.max(280, Math.round(windowH - 360));
+  const channelListH = measuredListH || Math.max(280, windowH - (tv ? 140 : 260));
   // iOS: AVPlayer cannot play MPEG-TS. Web: mpegts.js drifts A/V on IPTV PCRs.
   const preferHls = Platform.OS === "ios" || Platform.OS === "web";
+
+  useEffect(() => {
+    if (!collapsible) setRailOpen(false);
+  }, [collapsible]);
 
   const groups = useQuery({ queryKey: ["live", "groups"], queryFn: () => liveGroups() });
   const groupItems = groups.data?.items;
@@ -195,19 +195,12 @@ export function LiveScreen({
   const filterItems = useMemo<FilterItem[]>(() => {
     const list = groupItems ?? [];
     return [
-      {
-        id: "",
-        label: "All",
-        count: tv ? list.reduce((n, g) => n + (g.channelCount ?? 0), 0) || undefined : undefined,
-      },
-      { id: "favourites", label: "Favourites", count: tv ? favourites.size : undefined },
-      ...list.map((g) => ({
-        id: g.id,
-        label: tv ? displayGroupName(g.name) : g.name,
-        count: tv ? g.channelCount : undefined,
-      })),
+      { id: "", label: "All", count: list.reduce((n, g) => n + (g.channelCount ?? 0), 0) || undefined },
+      { id: "favourites", label: "Favourites", count: favourites.size },
+      ...list.map((g) => ({ id: g.id, label: displayGroupName(g.name), count: g.channelCount })),
     ];
-  }, [groupItems, favourites, tv]);
+  }, [groupItems, favourites]);
+  const activeFilter = filterItems.find((f) => f.id === groupId) ?? filterItems[0]!;
 
   const playMutation = useMutation({
     mutationFn: (uuid: string) => playLiveChannel(uuid, { hls: preferHls }),
@@ -240,52 +233,46 @@ export function LiveScreen({
     const idx = SORT_CYCLE.indexOf(sort);
     setSort(SORT_CYCLE[(idx + 1) % SORT_CYCLE.length]!);
   };
-
-  const columns = viewMode === "card" ? 2 : 1;
-  const rowH = viewMode === "card" ? CARD_ROW_H : LIST_ROW_H;
+  const selectGroup = useCallback((id: string) => {
+    setGroupId(id);
+    setRailOpen(false);
+  }, []);
 
   const { keepInView, scrollToTop } = useKeepFocusedRowInView(channelListRef, {
     enabled: tv,
-    rowH,
-    columns,
+    rowH: LIST_ROW_H,
     viewportH: channelListH,
   });
   const rail = useKeepFocusedRowInView(railListRef, {
     enabled: tv,
     rowH: RAIL_ROW_H,
-    columns: 1,
     viewportH: railListH,
   });
 
-  // A new filter, search, sort or view starts at the top.
+  // A new filter, search or sort starts at the top.
   useEffect(() => {
     scrollToTop();
-  }, [groupId, query, sort, viewMode, scrollToTop]);
+  }, [groupId, query, sort, scrollToTop]);
 
   const play = playMutation.mutate;
   const toggleFavourite = favMutation.mutate;
   const playEnabled = !playMutation.isPending;
   const renderChannel = useCallback<ListRenderItem<LiveChannel>>(
-    ({ item, index }) => {
-      const Item = viewMode === "card" ? ChannelCard : ChannelRow;
-      return (
-        <Item
-          channel={item}
-          index={index}
-          now={nowMap.get(item.uuid)}
-          favourite={favourites.has(item.uuid)}
-          playEnabled={playEnabled}
-          showFocusRing={tv}
-          // On TV, OK on the row plays it, and empty guide text is mostly noise.
-          showPlayButton={!tv}
-          showEmptyGuide={!tv}
-          onPlay={play}
-          onFav={toggleFavourite}
-          onFocusIndex={keepInView}
-        />
-      );
-    },
-    [viewMode, nowMap, favourites, playEnabled, tv, play, toggleFavourite, keepInView],
+    ({ item, index }) => (
+      <ChannelRow
+        channel={item}
+        index={index}
+        now={nowMap.get(item.uuid)}
+        favourite={favourites.has(item.uuid)}
+        playEnabled={playEnabled}
+        tv={tv}
+        narrow={collapsible}
+        onPlay={play}
+        onFav={toggleFavourite}
+        onFocusIndex={keepInView}
+      />
+    ),
+    [nowMap, favourites, playEnabled, tv, collapsible, play, toggleFavourite, keepInView],
   );
   const renderRailItem = useCallback<ListRenderItem<FilterItem>>(
     ({ item, index }) => (
@@ -293,19 +280,20 @@ export function LiveScreen({
         item={item}
         index={index}
         active={groupId === item.id}
-        onSelect={setGroupId}
+        tv={tv}
+        onSelect={selectGroup}
         onFocusIndex={rail.keepInView}
       />
     ),
-    [groupId, rail.keepInView],
+    [groupId, tv, selectGroup, rail.keepInView],
   );
   const getRailItemLayout = useCallback(
     (_: unknown, index: number) => ({ length: RAIL_ROW_H, offset: RAIL_ROW_H * index, index }),
     [],
   );
   const getItemLayout = useCallback(
-    (_: unknown, index: number) => ({ length: rowH, offset: rowH * index, index }),
-    [rowH],
+    (_: unknown, index: number) => ({ length: LIST_ROW_H, offset: LIST_ROW_H * index, index }),
+    [],
   );
   const loadMore = useCallback(() => {
     if (channels.hasNextPage && !channels.isFetchingNextPage) void channels.fetchNextPage();
@@ -317,7 +305,6 @@ export function LiveScreen({
       onFocus={tv ? () => setSearchFocused(true) : undefined}
       onBlur={tv ? () => setSearchFocused(false) : undefined}
       style={(s) => [
-        styles.searchWrap,
         tv && styles.searchWrapTv,
         tv && (searchFocused || isTvFocused(s)) && styles.searchWrapFocused,
       ]}
@@ -355,17 +342,60 @@ export function LiveScreen({
       ) : null}
     </>
   );
+  const railList = (
+    <View
+      style={styles.fill}
+      onLayout={(e) => setRailListH(Math.floor(e.nativeEvent.layout.height))}
+    >
+      <FlatList
+        ref={railListRef}
+        style={{ height: railListH }}
+        data={filterItems}
+        keyExtractor={filterKey}
+        renderItem={renderRailItem}
+        getItemLayout={getRailItemLayout}
+        removeClippedSubviews={false}
+      />
+    </View>
+  );
+  const sortRow = (
+    <View style={styles.railSort}>
+      <Pressable
+        onPress={cycleSort}
+        accessibilityRole="button"
+        accessibilityLabel={`Sort by ${SORT_LABELS[sort]}`}
+        style={(state: PressState) => [
+          styles.railItem,
+          styles.railSortItem,
+          (state.hovered || state.pressed) && styles.railItemHovered,
+          tv && isTvFocused(state) && styles.railItemFocused,
+        ]}
+      >
+        {(state) => {
+          const focused = tv && isTvFocused(state);
+          return (
+            <>
+              <Text style={[styles.railLabel, focused && styles.railLabelFocused]}>Sort</Text>
+              <Text style={[styles.railSortValue, focused && styles.railLabelFocused]}>
+                {SORT_LABELS[sort]}
+              </Text>
+            </>
+          );
+        }}
+      </Pressable>
+    </View>
+  );
   const channelList = (
     <FlatList
-      // FlatList cannot change numColumns in place.
-      key={viewMode}
       ref={channelListRef}
-      style={[styles.channelListBox, { height: channelListH }]}
+      style={{
+        height: channelListH,
+        paddingLeft: collapsible ? insetX : 16,
+        paddingRight: insetX,
+      }}
       data={items}
       keyExtractor={channelKey}
       renderItem={renderChannel}
-      numColumns={columns}
-      columnWrapperStyle={columns > 1 ? styles.cardRow : undefined}
       getItemLayout={getItemLayout}
       onEndReached={loadMore}
       onEndReachedThreshold={1.5}
@@ -389,154 +419,64 @@ export function LiveScreen({
     />
   );
 
-  if (tv) {
-    return (
-      <View style={styles.page}>
-        {header}
-        <View style={styles.tvBody}>
-          <View style={styles.rail}>
-            {searchBox}
-            <View
-              style={styles.fill}
-              onLayout={(e) => setRailListH(Math.floor(e.nativeEvent.layout.height))}
-            >
-              <FlatList
-                ref={railListRef}
-                style={{ height: railListH }}
-                data={filterItems}
-                keyExtractor={filterKey}
-                renderItem={renderRailItem}
-                getItemLayout={getRailItemLayout}
-                removeClippedSubviews={false}
-              />
-            </View>
-            <View style={styles.railSort}>
-              <Pressable
-                onPress={cycleSort}
-                accessibilityRole="button"
-                accessibilityLabel={`Sort by ${SORT_LABELS[sort]}`}
-                style={(state) => [
-                  styles.railItem,
-                  styles.railSortItem,
-                  isTvFocused(state) && styles.railItemFocused,
-                ]}
-              >
-                {(state) => {
-                  const focused = isTvFocused(state);
-                  return (
-                    <>
-                      <Text style={[styles.railLabel, focused && styles.railLabelFocused]}>
-                        Sort
-                      </Text>
-                      <Text style={[styles.railSortValue, focused && styles.railLabelFocused]}>
-                        {SORT_LABELS[sort]}
-                      </Text>
-                    </>
-                  );
-                }}
-              </Pressable>
-            </View>
-          </View>
-          <View style={styles.tvMain}>
-            {status}
-            <View
-              style={styles.fill}
-              onLayout={(e) => setTvListH(Math.floor(e.nativeEvent.layout.height))}
-            >
-              {channelList}
-            </View>
-          </View>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.page}>
       {header}
-      <View style={styles.bodyPad}>
-        {searchBox}
-
-        <View style={styles.toolbar}>
-          <Button
-            label={SORT_LABELS[sort]}
-            variant="ghost"
-            onPress={cycleSort}
-            style={styles.toolbarBtn}
-          />
-          <View style={styles.viewToggle}>
-            <Pressable
-              onPress={() => setViewMode("list")}
-              style={[styles.viewBtn, viewMode === "list" && styles.viewBtnOn]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: viewMode === "list" }}
-              accessibilityLabel="List view"
-            >
-              <Text style={[styles.viewBtnLabel, viewMode === "list" && styles.viewBtnLabelOn]}>
-                List
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setViewMode("card")}
-              style={[styles.viewBtn, viewMode === "card" && styles.viewBtnOn]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: viewMode === "card" }}
-              accessibilityLabel="Card view"
-            >
-              <Text style={[styles.viewBtnLabel, viewMode === "card" && styles.viewBtnLabelOn]}>
-                Card
-              </Text>
-            </Pressable>
+      {collapsible ? (
+        <View style={[styles.compactBar, { paddingHorizontal: insetX }]}>
+          <Pressable
+            onPress={() => setRailOpen((open) => !open)}
+            accessibilityRole="button"
+            accessibilityLabel="Channel groups"
+            accessibilityState={{ expanded: railOpen }}
+            style={(state: PressState) => [
+              styles.groupButton,
+              (state.hovered || state.pressed || railOpen) && styles.groupButtonOn,
+            ]}
+          >
+            <Text style={styles.groupButtonIcon}>☰</Text>
+            <Text style={styles.groupButtonLabel} numberOfLines={1}>
+              {activeFilter.label}
+            </Text>
+            {activeFilter.count != null ? (
+              <Text style={styles.railCount}>{activeFilter.count}</Text>
+            ) : null}
+          </Pressable>
+          <View style={styles.fill}>{searchBox}</View>
+        </View>
+      ) : null}
+      <View style={[styles.body, { paddingLeft: collapsible ? 0 : insetX }]}>
+        {collapsible ? null : (
+          <View style={{ width: tv ? RAIL_W_TV : RAIL_W }}>
+            <View style={styles.railSearch}>{searchBox}</View>
+            {railList}
+            {sortRow}
+          </View>
+        )}
+        <View style={styles.main}>
+          {status}
+          <View
+            style={styles.fill}
+            onLayout={(e) => setMeasuredListH(Math.floor(e.nativeEvent.layout.height))}
+          >
+            {channelList}
           </View>
         </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filtersScroll}
-          contentContainerStyle={styles.filters}
-        >
-          {filterItems.map((item) => (
-            <FilterChip
-              key={filterKey(item)}
-              label={item.label}
-              active={groupId === item.id}
-              onPress={() => setGroupId(item.id)}
+        {collapsible && railOpen ? (
+          <>
+            <Pressable
+              style={styles.backdrop}
+              onPress={() => setRailOpen(false)}
+              accessibilityLabel="Close channel groups"
             />
-          ))}
-        </ScrollView>
-
-        {status}
+            <View style={styles.drawer}>
+              {railList}
+              {sortRow}
+            </View>
+          </>
+        ) : null}
       </View>
-
-      {channelList}
     </View>
-  );
-}
-
-function FilterChip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      style={[styles.filterChip, active && styles.filterChipActive]}
-    >
-      <Text
-        style={[styles.filterChipLabel, active && styles.filterChipLabelActive]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -544,12 +484,14 @@ const RailItem = memo(function RailItem({
   item,
   index,
   active,
+  tv,
   onSelect,
   onFocusIndex,
 }: {
   item: FilterItem;
   index: number;
   active: boolean;
+  tv: boolean;
   onSelect: (id: string) => void;
   onFocusIndex: (index: number) => void;
 }) {
@@ -559,14 +501,15 @@ const RailItem = memo(function RailItem({
       onFocus={() => onFocusIndex(index)}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={(state) => [
+      style={(state: PressState) => [
         styles.railItem,
         active && styles.railItemActive,
-        isTvFocused(state) && styles.railItemFocused,
+        !active && (state.hovered || state.pressed) && styles.railItemHovered,
+        tv && isTvFocused(state) && styles.railItemFocused,
       ]}
     >
       {(state) => {
-        const focused = isTvFocused(state);
+        const focused = tv && isTvFocused(state);
         return (
           <>
             <Text
@@ -623,83 +566,49 @@ function ChannelLogo({
   );
 }
 
-function PlayChannelButton({
-  enabled,
-  onPress,
-  onFocus,
-  compact = false,
-  showFocusRing = false,
-}: {
-  enabled: boolean;
-  onPress: () => void;
-  onFocus?: () => void;
-  compact?: boolean;
-  showFocusRing?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      onFocus={onFocus}
-      disabled={!enabled}
-      accessibilityRole="button"
-      accessibilityLabel="Play"
-      style={(state) => [
-        styles.playBtn,
-        compact && styles.playBtnCompact,
-        !enabled && styles.playBtnDisabled,
-        state.pressed && enabled && styles.playBtnPressed,
-        showFocusRing && isTvFocused(state) && styles.playBtnFocused,
-      ]}
-    >
-      <PlayIcon color={colors.text} size={compact ? 14 : 16} />
-      <Text style={styles.playBtnLabel}>Play</Text>
-    </Pressable>
-  );
-}
-
-type ChannelItemProps = {
-  channel: LiveChannel;
-  index: number;
-  now?: LiveNowNext;
-  favourite: boolean;
-  playEnabled: boolean;
-  showFocusRing?: boolean;
-  /** List rows only. */
-  showPlayButton?: boolean;
-  showEmptyGuide?: boolean;
-  onPlay: (uuid: string) => void;
-  onFav: (uuid: string) => void;
-  onFocusIndex: (index: number) => void;
-};
-
+/** Pressing or clicking a row plays it; the star is the only other action. */
 const ChannelRow = memo(function ChannelRow({
   channel,
   index,
   now,
   favourite,
   playEnabled,
-  showFocusRing = false,
-  showPlayButton = true,
-  showEmptyGuide = true,
+  tv,
+  narrow,
   onPlay,
   onFav,
   onFocusIndex,
-}: ChannelItemProps) {
-  const play = () => onPlay(channel.uuid);
+}: {
+  channel: LiveChannel;
+  index: number;
+  now?: LiveNowNext;
+  favourite: boolean;
+  playEnabled: boolean;
+  tv: boolean;
+  narrow: boolean;
+  onPlay: (uuid: string) => void;
+  onFav: (uuid: string) => void;
+  onFocusIndex: (index: number) => void;
+}) {
   const fireFocus = () => onFocusIndex(index);
-  const nowTitle = now?.now?.title ?? (showEmptyGuide ? "No guide data" : null);
+  const nowTitle = now?.now?.title;
   return (
     <View style={styles.row}>
-      <Text style={styles.num} numberOfLines={1} adjustsFontSizeToFit>{channel.number ?? ""}</Text>
+      <Text style={[styles.num, narrow && styles.numNarrow]} numberOfLines={1} adjustsFontSizeToFit>
+        {channel.number ?? ""}
+      </Text>
       <ChannelLogo channel={channel} size={40} style={styles.rowLogo} />
       <Pressable
-        onPress={play}
+        onPress={() => onPlay(channel.uuid)}
         onFocus={fireFocus}
         disabled={!playEnabled}
-        style={(state) => [
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${channel.name}`}
+        style={(state: PressState) => [
           styles.rowBody,
-          state.pressed && playEnabled && styles.rowPressed,
-          showFocusRing && isTvFocused(state) && tvFocusHighlight,
+          !tv && styles.rowBodyTouch,
+          (state.hovered || state.pressed) && playEnabled && styles.rowHovered,
+          tv && isTvFocused(state) && tvFocusHighlight,
         ]}
       >
         <Text style={styles.name} numberOfLines={1}>
@@ -717,87 +626,64 @@ const ChannelRow = memo(function ChannelRow({
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={favourite ? "Remove from favourites" : "Add to favourites"}
-        style={(state) => [
-          styles.rowFav,
-          showFocusRing && isTvFocused(state) && styles.rowFavFocused,
-        ]}
+        style={(state) => [styles.rowFav, tv && isTvFocused(state) && styles.rowFavFocused]}
       >
         <Text style={[styles.rowFavLabel, favourite && styles.rowFavLabelOn]}>
           {favourite ? "★" : "☆"}
         </Text>
       </Pressable>
-      {showPlayButton ? (
-        <PlayChannelButton
-          enabled={playEnabled}
-          onPress={play}
-          onFocus={fireFocus}
-          compact
-          showFocusRing={showFocusRing}
-        />
-      ) : null}
     </View>
-  );
-});
-
-const ChannelCard = memo(function ChannelCard({
-  channel,
-  index,
-  now,
-  favourite,
-  playEnabled,
-  showFocusRing = false,
-  onPlay,
-  onFav,
-  onFocusIndex,
-}: ChannelItemProps) {
-  const play = () => onPlay(channel.uuid);
-  const fireFocus = () => onFocusIndex(index);
-  return (
-    <Pressable
-      onPress={play}
-      onFocus={fireFocus}
-      disabled={!playEnabled}
-      style={(state) => [
-        styles.card,
-        showFocusRing && isTvFocused(state) && styles.cardFocused,
-      ]}
-    >
-      <View style={styles.cardTop}>
-        <ChannelLogo channel={channel} size={56} />
-        <Pressable
-          onPress={() => onFav(channel.uuid)}
-          onFocus={fireFocus}
-          hitSlop={8}
-          style={(state) => [
-            styles.cardFav,
-            showFocusRing && isTvFocused(state) && styles.cardFavFocused,
-          ]}
-        >
-          <Text style={styles.cardFavLabel}>{favourite ? "★" : "☆"}</Text>
-        </Pressable>
-      </View>
-      {channel.number != null ? <Text style={styles.cardNum}>{channel.number}</Text> : null}
-      <Text style={styles.cardName} numberOfLines={2}>
-        {channel.name}
-      </Text>
-      <Text style={styles.cardNow} numberOfLines={2}>
-        {now?.now?.title ?? "No guide data"}
-      </Text>
-      <PlayChannelButton
-        enabled={playEnabled}
-        onPress={play}
-        onFocus={fireFocus}
-        showFocusRing={showFocusRing}
-      />
-    </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: webBg },
   fill: { flex: 1 },
-  tvBody: { flex: 1, flexDirection: "row", gap: 8, paddingLeft: 16, paddingBottom: 12 },
-  rail: { width: RAIL_W },
+  body: { flex: 1, flexDirection: "row", paddingBottom: 12 },
+  main: { flex: 1, minWidth: 0 },
+  compactBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  groupButton: {
+    maxWidth: "45%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: colors.bg2,
+  },
+  groupButtonOn: { backgroundColor: "rgba(255,255,255,0.16)" },
+  groupButtonIcon: { color: colors.text, fontSize: 16 },
+  groupButtonLabel: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
+  backdrop: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  drawer: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: "85%",
+    maxWidth: 320,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 12,
+    backgroundColor: colors.bg1,
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 12,
+    elevation: 12,
+  },
+  railSearch: { marginBottom: 8 },
   railSort: {
     marginTop: 4,
     paddingTop: 8,
@@ -806,7 +692,6 @@ const styles = StyleSheet.create({
   },
   railSortItem: { marginBottom: 0 },
   railSortValue: { color: colors.text, fontSize: 14, fontWeight: "600", marginLeft: 8 },
-  tvMain: { flex: 1, minWidth: 0 },
   railItem: {
     height: RAIL_ROW_H - 4,
     marginBottom: 4,
@@ -818,15 +703,13 @@ const styles = StyleSheet.create({
     borderLeftColor: "transparent",
   },
   railItemActive: { borderLeftColor: colors.accent, backgroundColor: "rgba(255,255,255,0.08)" },
+  railItemHovered: { backgroundColor: "rgba(255,255,255,0.05)" },
   railItemFocused: { backgroundColor: colors.focus },
   railLabel: { flex: 1, color: colors.muted, fontSize: 15, fontWeight: "600" },
   railLabelActive: { color: colors.text },
   railLabelFocused: { color: colors.bg },
   railCount: { color: colors.muted, fontSize: 13, marginLeft: 8 },
-  bodyPad: { paddingHorizontal: 16 },
-  searchWrap: { marginBottom: 10 },
   searchWrapTv: {
-    marginBottom: 6,
     borderRadius: 10,
     borderWidth: 3,
     borderColor: "transparent",
@@ -844,83 +727,10 @@ const styles = StyleSheet.create({
   },
   searchTv: { paddingVertical: 8 },
   searchFocused: { backgroundColor: "#fff", color: "#111" },
-  toolbar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 10,
-    marginBottom: 10,
-  },
-  toolbarBtn: { paddingVertical: 8, paddingHorizontal: 12 },
-  viewToggle: {
-    flexDirection: "row",
-    borderRadius: 8,
-    overflow: "hidden",
-    backgroundColor: colors.bg2,
-  },
-  viewBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  viewBtnOn: {
-    backgroundColor: colors.text,
-  },
-  viewBtnLabel: {
-    color: colors.muted,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  viewBtnLabelOn: {
-    color: colors.bg,
-  },
-  // Single horizontal row — never wrap; do not grow (must not crush the channel list).
-  filtersScroll: {
-    flexGrow: 0,
-    flexShrink: 0,
-    marginBottom: 12,
-    maxHeight: 48,
-  },
-  filters: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    alignItems: "center",
-    gap: 8,
-    paddingRight: 8,
-    minHeight: 44,
-  },
-  channelListBox: { paddingHorizontal: 16 },
-  cardRow: { gap: CARD_GAP, marginBottom: CARD_GAP },
   loadingMore: { color: colors.muted, fontSize: 13, paddingVertical: 16, textAlign: "center" },
   empty: { color: colors.muted, fontSize: 15, paddingVertical: 24 },
-  filterChip: {
-    backgroundColor: colors.bg2,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    minHeight: 40,
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-    flexShrink: 0,
-    marginRight: 0,
-  },
-  filterChipActive: {
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderColor: "rgba(255,255,255,0.4)",
-  },
-  filterChipLabel: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 20,
-  },
-  filterChipLabelActive: {
-    color: colors.text,
-  },
-  starting: { color: colors.muted, marginBottom: 8, fontSize: 13 },
-  error: { color: colors.danger, marginBottom: 8 },
+  starting: { color: colors.muted, marginBottom: 8, fontSize: 13, paddingLeft: 16 },
+  error: { color: colors.danger, marginBottom: 8, paddingLeft: 16 },
   row: {
     height: LIST_ROW_H,
     flexDirection: "row",
@@ -929,10 +739,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.bg2,
   },
-  rowPressed: { backgroundColor: colors.bg1 },
+  rowHovered: { backgroundColor: colors.bg1 },
   num: { color: colors.muted, width: 52, fontSize: 14 },
+  numNarrow: { width: 40, fontSize: 12 },
   rowLogo: { backgroundColor: colors.bg2 },
   rowBody: { flex: 1, minWidth: 0 },
+  /** The whole row height is the tap/hover target off TV. */
+  rowBodyTouch: { alignSelf: "stretch", justifyContent: "center", borderRadius: 6, paddingHorizontal: 6 },
   name: { color: colors.text, fontSize: 16, fontWeight: "600" },
   now: { color: colors.muted, fontSize: 13, marginTop: 2 },
   rowFav: {
@@ -955,74 +768,6 @@ const styles = StyleSheet.create({
   },
   logoFallbackText: {
     color: colors.muted,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  card: {
-    flex: 1,
-    height: CARD_ROW_H - CARD_GAP,
-    overflow: "hidden",
-    backgroundColor: colors.bg1,
-    borderRadius: 10,
-    padding: 12,
-    minWidth: 0,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  cardFocused: {
-    borderColor: colors.focus,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    transform: [{ scale: 1.04 }],
-  },
-  cardTop: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  cardFav: {
-    padding: 4,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  cardFavFocused: {
-    borderColor: colors.focus,
-    backgroundColor: colors.focus,
-  },
-  cardFavLabel: { color: colors.accent, fontSize: 18 },
-  cardNum: { color: colors.muted, fontSize: 12, marginBottom: 2 },
-  cardName: { color: colors.text, fontSize: 15, fontWeight: "700", marginBottom: 4 },
-  cardNow: { color: colors.muted, fontSize: 12, lineHeight: 16, marginBottom: 10 },
-  playBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: colors.accent,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  playBtnCompact: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 6,
-  },
-  playBtnDisabled: {
-    opacity: 0.45,
-  },
-  playBtnPressed: {
-    opacity: 0.85,
-  },
-  playBtnFocused: {
-    borderColor: colors.focus,
-    transform: [{ scale: 1.08 }],
-  },
-  playBtnLabel: {
-    color: colors.text,
     fontSize: 14,
     fontWeight: "700",
   },
