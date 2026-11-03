@@ -1,6 +1,6 @@
-import { type JSX, useEffect } from "react";
+import { type JSX, useEffect, useMemo } from "react";
 import { NavigationContainer, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createBottomTabNavigator, type BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { me, syncPreferences } from "@reclinarr/client";
@@ -10,7 +10,7 @@ import type { MainTabParamList, Nav, RootStackParamList } from "./src/nav";
 import { attachClient, loadServerUrl, syncTvInput } from "./src/session";
 import { TvInput } from "./modules/tv-input";
 import { AnalyticsConsentGate, webBg } from "@reclinarr/native-ui";
-import { MainTabContext } from "./src/components/Chrome";
+import { MainTabBar, MainTabContext } from "./src/components/Chrome";
 import { BootSkeleton } from "./src/components/Skeleton";
 import { ServerScreen } from "./src/screens/ServerScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -68,10 +68,14 @@ function withUser(Screen: (props: { username: string }) => JSX.Element) {
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });
       }
     }, [navigation, session.isError]);
+    const username = session.data?.user?.username ?? "";
+    // Built once per user: a tab focus change must not re-render the whole page,
+    // which on a TV CPU stalls each tab switch.
+    const screen = useMemo(() => <Screen username={username} />, [username]);
     if (session.isLoading || session.isError || !session.data?.user) return <Loading />;
     return (
       <AnalyticsConsentGate userId={session.data.user.id} screen={route.name.toLowerCase()} active={focused}>
-        <Screen username={session.data.user.username ?? ""} />
+        {screen}
       </AnalyticsConsentGate>
     );
   };
@@ -87,6 +91,17 @@ const Requests = withUser(RequestsScreen);
 const Settings = withUser(SettingsScreen);
 const Details = withUser(DetailsScreen);
 
+function TopBar({ state, navigation }: BottomTabBarProps) {
+  const session = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  return (
+    <MainTabBar
+      state={state}
+      navigation={navigation}
+      username={session.data?.user?.username ?? undefined}
+    />
+  );
+}
+
 /** Visited tabs stay mounted so switching back does not rebuild the page. */
 function MainTabs() {
   return (
@@ -94,8 +109,8 @@ function MainTabs() {
       <Tabs.Navigator
         initialRouteName="Home"
         backBehavior="initialRoute"
-        // Chrome draws the top nav inside each screen.
-        tabBar={() => null}
+        // One top nav over all tab pages, so focus never leaves it while pages swap.
+        tabBar={(props) => <TopBar {...props} />}
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: webBg } }}
       >
         <Tabs.Screen name="Home" component={Home} />
