@@ -103,6 +103,61 @@ const GridSchema = z
   })
   .passthrough();
 
+/** Upstream channel pages: 100 rows each, fetched this many at a time once the count is known. */
+const CHANNEL_PAGE_SIZE = 100;
+const CHANNEL_PAGE_CONCURRENCY = 4;
+/** Cap pages high enough for large lineups (100 × 200 = 20k channels). */
+const CHANNEL_MAX_PAGES = 200;
+const LIVE_LIST_FRESH_MS = 60_000;
+
+/**
+ * Serves the last loaded value immediately and reloads it in the background once it is
+ * older than `freshMs`. Only the very first call waits; concurrent callers share one load.
+ */
+class StaleWhileRevalidate<T> {
+  private value?: { at: number; data: T };
+  private inflight?: Promise<T>;
+  private generation = 0;
+
+  constructor(
+    private readonly label: string,
+    private readonly freshMs: number,
+    private readonly load: () => Promise<T>,
+  ) {}
+
+  get(): Promise<T> {
+    const value = this.value;
+    if (!value) return this.reload();
+    if (Date.now() - value.at >= this.freshMs && !this.inflight) {
+      this.reload().catch((err: unknown) => {
+        console.error(`[dispatcharr] ${this.label} refresh failed; serving the previous copy`, err);
+      });
+    }
+    return Promise.resolve(value.data);
+  }
+
+  clear(): void {
+    this.generation += 1;
+    this.value = undefined;
+    this.inflight = undefined;
+  }
+
+  private reload(): Promise<T> {
+    if (this.inflight) return this.inflight;
+    const generation = this.generation;
+    const run = this.load()
+      .then((data) => {
+        if (generation === this.generation) this.value = { at: Date.now(), data };
+        return data;
+      })
+      .finally(() => {
+        if (this.inflight === run) this.inflight = undefined;
+      });
+    this.inflight = run;
+    return run;
+  }
+}
+
 export class DispatcharrProvider implements VodProvider, LiveTvProvider, AcquisitionSourceProvider {
   readonly id = "dispatcharr";
   private readonly baseUrl: string;
@@ -118,8 +173,13 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   private readonly tmdbCache = new Map<string, { at: number; media: Media | null }>();
   private static readonly TMDB_CACHE_TTL_MS = 10 * 60_000;
   private static readonly TMDB_CACHE_MAX_ENTRIES = 2000;
-  private groupsCache?: { at: number; items: LiveChannelGroup[] };
-  private channelsCache?: { at: number; items: LiveChannel[] };
+  private readonly groups = new StaleWhileRevalidate("channel groups", LIVE_LIST_FRESH_MS, () =>
+    this.fetchChannelGroups(),
+  );
+  // A big lineup takes seconds to page through, so a stale copy beats blocking Live TV.
+  private readonly channels = new StaleWhileRevalidate("channel lineup", LIVE_LIST_FRESH_MS, () =>
+    this.fetchAllChannels(),
+  );
   private nowNextGrid?: { at: number; items: EpgProgramme[] };
 
   constructor(opts: DispatcharrProviderOptions) {
@@ -945,8 +1005,8 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   /** Expose for tests / indexers */
   clearCache(): void {
     this.tmdbCache.clear();
-    this.groupsCache = undefined;
-    this.channelsCache = undefined;
+    this.groups.clear();
+    this.channels.clear();
   }
 
   /**
@@ -1015,18 +1075,16 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
   }
 
   async listChannelGroups(): Promise<LiveChannelGroup[]> {
-    const now = Date.now();
-    if (this.groupsCache && now - this.groupsCache.at < 60_000) {
-      return this.groupsCache.items;
-    }
+    return this.groups.get();
+  }
+
+  private async fetchChannelGroups(): Promise<LiveChannelGroup[]> {
     const http = await this.http();
     const { data } = await http.request("GET", "/api/channels/groups/", {
       schema: GroupsSchema,
     });
     const raw = Array.isArray(data) ? data : (data.results ?? []);
-    const items = raw.map((g) => ({ id: String(g.id), name: g.name }));
-    this.groupsCache = { at: now, items };
-    return items;
+    return raw.map((g) => ({ id: String(g.id), name: g.name }));
   }
 
   async listChannels(opts?: {
@@ -1298,38 +1356,44 @@ export class DispatcharrProvider implements VodProvider, LiveTvProvider, Acquisi
     });
   }
 
-  private async loadAllChannels(): Promise<LiveChannel[]> {
-    const now = Date.now();
-    if (this.channelsCache && now - this.channelsCache.at < 60_000) {
-      return this.channelsCache.items;
-    }
+  private loadAllChannels(): Promise<LiveChannel[]> {
+    return this.channels.get();
+  }
 
-    const groups = await this.listChannelGroups();
-    const groupNames = new Map(groups.map((g) => [g.id, g.name]));
+  private async fetchAllChannels(): Promise<LiveChannel[]> {
     const http = await this.http();
-    const items: LiveChannel[] = [];
-    let page = 1;
-    let totalPages = 1;
-
-    // Cap pages high enough for large lineups (100 × 200 = 20k channels).
-    while (page <= totalPages && page <= 200) {
+    const fetchPage = async (page: number) => {
       const { data } = await http.request("GET", "/api/channels/channels/", {
-        query: { page, page_size: 100 },
+        query: { page, page_size: CHANNEL_PAGE_SIZE },
         schema: ChannelsPageSchema,
       });
-      const results = data.results ?? [];
+      return data;
+    };
+
+    const [groups, first] = await Promise.all([this.listChannelGroups(), fetchPage(1)]);
+    const pages = [first.results ?? []];
+    const count = first.count ?? pages[0]!.length;
+    const totalPages = Math.min(CHANNEL_MAX_PAGES, Math.max(1, Math.ceil(count / CHANNEL_PAGE_SIZE)));
+    let nextPage = 2;
+    const worker = async () => {
+      while (nextPage <= totalPages) {
+        const page = nextPage++;
+        pages[page - 1] = (await fetchPage(page)).results ?? [];
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CHANNEL_PAGE_CONCURRENCY, totalPages - 1) }, worker),
+    );
+
+    const groupNames = new Map(groups.map((g) => [g.id, g.name]));
+    const items: LiveChannel[] = [];
+    for (const results of pages) {
       for (const ch of results) {
         if (ch.hidden_from_output) continue;
         items.push(this.mapChannel(ch, groupNames));
       }
-      const count = data.count ?? items.length;
-      totalPages = Math.max(1, Math.ceil(count / 100));
-      if (results.length === 0) break;
-      page += 1;
     }
-
     items.sort((a, b) => (a.number ?? 1e9) - (b.number ?? 1e9) || a.name.localeCompare(b.name));
-    this.channelsCache = { at: now, items };
     return items;
   }
 
