@@ -410,13 +410,32 @@ export function LiveScreen({
                 removeClippedSubviews={false}
               />
             </View>
-            <Button
-              label={`Sort: ${SORT_LABELS[sort]}`}
-              variant="ghost"
-              onPress={cycleSort}
-              style={styles.railSort}
-              showFocusRing
-            />
+            <View style={styles.railSort}>
+              <Pressable
+                onPress={cycleSort}
+                accessibilityRole="button"
+                accessibilityLabel={`Sort by ${SORT_LABELS[sort]}`}
+                style={(state) => [
+                  styles.railItem,
+                  styles.railSortItem,
+                  isTvFocused(state) && styles.railItemFocused,
+                ]}
+              >
+                {(state) => {
+                  const focused = isTvFocused(state);
+                  return (
+                    <>
+                      <Text style={[styles.railLabel, focused && styles.railLabelFocused]}>
+                        Sort
+                      </Text>
+                      <Text style={[styles.railSortValue, focused && styles.railLabelFocused]}>
+                        {SORT_LABELS[sort]}
+                      </Text>
+                    </>
+                  );
+                }}
+              </Pressable>
+            </View>
           </View>
           <View style={styles.tvMain}>
             {status}
@@ -779,7 +798,14 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   tvBody: { flex: 1, flexDirection: "row", gap: 8, paddingLeft: 16, paddingBottom: 12 },
   rail: { width: RAIL_W },
-  railSort: { marginTop: 8 },
+  railSort: {
+    marginTop: 4,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.16)",
+  },
+  railSortItem: { marginBottom: 0 },
+  railSortValue: { color: colors.text, fontSize: 14, fontWeight: "600", marginLeft: 8 },
   tvMain: { flex: 1, minWidth: 0 },
   railItem: {
     height: RAIL_ROW_H - 4,
