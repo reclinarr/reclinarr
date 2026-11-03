@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -8,12 +9,17 @@ import {
   TextInput,
   View,
   useWindowDimensions,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+  type ListRenderItem,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { LiveChannel, LiveNowNext } from "@reclinarr/shared";
 import {
   liveChannels,
@@ -44,6 +50,25 @@ const SORT_LABELS: Record<LiveSort, string> = {
   name_desc: "Name Z–A",
 };
 
+const PAGE_SIZE = 60;
+const SEARCH_DEBOUNCE_MS = 300;
+/** Fixed row heights let the list place a focused row by index, without measuring it. */
+const LIST_ROW_H = 64;
+const CARD_ROW_H = 250;
+const CARD_GAP = 10;
+
+type NowQueryResult = { data?: { items: LiveNowNext[] } };
+
+function combineNow(results: NowQueryResult[]): Map<string, LiveNowNext> {
+  const map = new Map<string, LiveNowNext>();
+  for (const result of results) {
+    for (const item of result.data?.items ?? []) map.set(item.channelUuid, item);
+  }
+  return map;
+}
+
+const channelKey = (item: LiveChannel) => item.uuid;
+
 export function LiveScreen({
   nav,
   header,
@@ -54,16 +79,15 @@ export function LiveScreen({
   const { height: windowH } = useWindowDimensions();
   const [groupId, setGroupId] = useState<string | "favourites" | "">("");
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
-  const [page, setPage] = useState(1);
   const [sort, setSort] = useState<LiveSort>("number");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const searchInputRef = useRef<TextInput>(null);
   const filterScrollRef = useRef<ScrollView>(null);
-  const channelListRef = useRef<ScrollView>(null);
+  const channelListRef = useRef<FlatList<LiveChannel>>(null);
+  /** Where the list was last scrolled to; on TV only this code scrolls it. */
   const channelScrollY = useRef(0);
-  const listRowH = useRef(64);
-  const cardRowH = useRef(180);
   const filterOffsets = useRef<Record<string, number>>({});
   // Android TV Yoga often collapses flex:1 FlatLists under the filter row to 0 height.
   // Pin an explicit viewport so channels actually paint and can scroll with focus.
@@ -80,42 +104,58 @@ export function LiveScreen({
     ],
     [groups.data?.items],
   );
-  const channels = useQuery({
-    queryKey: ["live", "channels", groupId, search, page, sort],
-    queryFn: () =>
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Pages load as the list nears its end, so a big lineup never needs a pager.
+  const channels = useInfiniteQuery({
+    queryKey: ["live", "channels", groupId, query, sort],
+    queryFn: ({ pageParam }) =>
       liveChannels({
         groupId: groupId && groupId !== "favourites" ? groupId : undefined,
         favouritesOnly: groupId === "favourites",
-        search: search.trim() || undefined,
-        page,
-        pageSize: 60,
+        search: query || undefined,
+        page: pageParam,
+        pageSize: PAGE_SIZE,
         sort,
       }),
+    initialPageParam: 1,
+    getNextPageParam: (last, all) =>
+      all.length * PAGE_SIZE < last.total ? all.length + 1 : undefined,
+  });
+  const pages = channels.data?.pages;
+  const items = useMemo(() => (pages ?? []).flatMap((p) => p.items), [pages]);
+
+  // One now/next query per loaded page keeps each request under the API's 80-channel cap.
+  const nowMap = useQueries({
+    queries: (pages ?? []).map((p) => {
+      const uuids = p.items.map((c) => c.uuid);
+      return {
+        queryKey: ["live", "now", uuids.join(",")],
+        queryFn: () => liveNow(uuids),
+        enabled: uuids.length > 0,
+        refetchInterval: 60_000,
+      };
+    }),
+    combine: combineNow,
   });
 
-  const channelUuids = useMemo(
-    () => (channels.data?.items ?? []).map((c) => c.uuid),
-    [channels.data?.items],
+  // A toggle answers with the full favourites list; use it instead of refetching every page.
+  const serverFavourites = pages?.[0]?.favourites;
+  const [toggledFavourites, setToggledFavourites] = useState<string[] | null>(null);
+  useEffect(() => setToggledFavourites(null), [serverFavourites]);
+  const favourites = useMemo(
+    () => new Set(toggledFavourites ?? serverFavourites ?? []),
+    [toggledFavourites, serverFavourites],
   );
-
-  const nowNext = useQuery({
-    queryKey: ["live", "now", channelUuids.join(",")],
-    queryFn: () => liveNow(channelUuids),
-    enabled: channelUuids.length > 0,
-    refetchInterval: 60_000,
-  });
-
-  const nowMap = useMemo(() => {
-    const map = new Map<string, LiveNowNext>();
-    for (const item of nowNext.data?.items ?? []) map.set(item.channelUuid, item);
-    return map;
-  }, [nowNext.data?.items]);
 
   const playMutation = useMutation({
     mutationFn: (uuid: string) => playLiveChannel(uuid, { hls: preferHls }),
     onSuccess: (data, uuid) => {
       trackFeature("live_tune");
-      const list = (channels.data?.items ?? []).map((c) => ({
+      const list = items.map((c) => ({
         uuid: c.uuid,
         name: c.name,
         number: c.number,
@@ -132,105 +172,80 @@ export function LiveScreen({
 
   const favMutation = useMutation({
     mutationFn: (uuid: string) => toggleLiveFavourite(uuid),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["live", "channels"] }),
+    onSuccess: (result) => {
+      setToggledFavourites(result.favourites);
+      if (groupId === "favourites") void qc.invalidateQueries({ queryKey: ["live", "channels"] });
+    },
   });
-
-  const totalPages = Math.max(1, Math.ceil((channels.data?.total ?? 0) / 60));
-  const favourites = channels.data?.favourites ?? [];
-  const items = channels.data?.items ?? [];
 
   const cycleSort = () => {
     const idx = SORT_CYCLE.indexOf(sort);
     setSort(SORT_CYCLE[(idx + 1) % SORT_CYCLE.length]!);
-    setPage(1);
   };
 
-  const setFilter = (next: string | "favourites" | "") => {
-    setGroupId(next);
-    setPage(1);
-  };
+  const columns = viewMode === "card" ? 2 : 1;
+  const rowH = viewMode === "card" ? CARD_ROW_H : LIST_ROW_H;
 
-  /** Keep the focused Live TV row/card inside the list viewport (D-pad does not auto-scroll). */
-  const scrollChannelIntoView = (index: number, target?: View | null) => {
-    if (!tv) return;
-    const list = channelListRef.current;
-    if (!list) return;
+  // A new filter, search, sort or view starts at the top.
+  useEffect(() => {
+    channelScrollY.current = 0;
+    channelListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [groupId, query, sort, viewMode]);
 
-    const applyDelta = (delta: number) => {
-      if (Math.abs(delta) < 4) return;
-      const next = Math.max(0, channelScrollY.current + delta);
+  /**
+   * Keep the focused row inside the list viewport (D-pad focus does not scroll it).
+   * The target comes from the row index alone, and the jump is not animated: a press
+   * that lands mid-animation makes Android search for the next row among moving views
+   * and focus snaps back several rows.
+   */
+  const keepInView = useCallback(
+    (index: number) => {
+      if (!tv) return;
+      const top = Math.floor(index / columns) * rowH;
+      // Show a row of context on each side when it fits; card rows on a TV barely fit once.
+      const margin = Math.max(0, Math.min(rowH, Math.floor((channelListH - rowH) / 2)));
+      const viewTop = channelScrollY.current;
+      let next = viewTop;
+      if (top < viewTop + margin) next = Math.max(0, top - margin);
+      else if (top + rowH + margin > viewTop + channelListH) {
+        next = top + rowH + margin - channelListH;
+      }
+      if (next === viewTop) return;
       channelScrollY.current = next;
-      list.scrollTo({ y: next, animated: true });
-    };
+      channelListRef.current?.scrollToOffset({ offset: next, animated: false });
+    },
+    [tv, columns, rowH, channelListH],
+  );
 
-    if (target) {
-      target.measureInWindow((_x, y, _w, h) => {
-        if (h <= 0) return;
-        // ScrollView instances expose NativeMethods; RN's ScrollView type omits them.
-        (list as unknown as View).measureInWindow((_lx, ly, _lw, lh) => {
-          if (lh <= 0) return;
-          const pad = 16;
-          const top = ly + pad;
-          const bottom = ly + lh - pad;
-          if (y + h > bottom) applyDelta(y + h - bottom);
-          else if (y < top) applyDelta(-(top - y));
-        });
-      });
-      return;
-    }
-
-    if (viewMode === "card") {
-      const row = Math.floor(index / 2);
-      list.scrollTo({
-        y: Math.max(0, row * cardRowH.current - cardRowH.current),
-        animated: true,
-      });
-    } else {
-      list.scrollTo({
-        y: Math.max(0, index * listRowH.current - listRowH.current * 2),
-        animated: true,
-      });
-    }
-  };
-
-  const renderChannel = (item: LiveChannel, index: number) => {
-    const favourite = favourites.includes(item.uuid);
-    const now = nowMap.get(item.uuid);
-    const onPlay = () => playMutation.mutate(item.uuid);
-    const onFocus = (target?: View | null) => scrollChannelIntoView(index, target);
-    if (viewMode === "card") {
+  const play = playMutation.mutate;
+  const toggleFavourite = favMutation.mutate;
+  const playEnabled = !playMutation.isPending;
+  const renderChannel = useCallback<ListRenderItem<LiveChannel>>(
+    ({ item, index }) => {
+      const Item = viewMode === "card" ? ChannelCard : ChannelRow;
       return (
-        <ChannelCard
+        <Item
           channel={item}
-          now={now}
-          favourite={favourite}
-          playEnabled={!playMutation.isPending}
+          index={index}
+          now={nowMap.get(item.uuid)}
+          favourite={favourites.has(item.uuid)}
+          playEnabled={playEnabled}
           showFocusRing={tv}
-          onPlay={onPlay}
-          onFav={() => favMutation.mutate(item.uuid)}
-          onFocus={onFocus}
-          onRowLayout={(h) => {
-            if (h > 40) cardRowH.current = h + 10;
-          }}
+          onPlay={play}
+          onFav={toggleFavourite}
+          onFocusIndex={keepInView}
         />
       );
-    }
-    return (
-      <ChannelRow
-        channel={item}
-        now={now}
-        favourite={favourite}
-        playEnabled={!playMutation.isPending}
-        showFocusRing={tv}
-        onPlay={onPlay}
-        onFav={() => favMutation.mutate(item.uuid)}
-        onFocus={onFocus}
-        onRowLayout={(h) => {
-          if (h > 40) listRowH.current = h;
-        }}
-      />
-    );
-  };
+    },
+    [viewMode, nowMap, favourites, playEnabled, tv, play, toggleFavourite, keepInView],
+  );
+  const getItemLayout = useCallback(
+    (_: unknown, index: number) => ({ length: rowH, offset: rowH * index, index }),
+    [rowH],
+  );
+  const loadMore = useCallback(() => {
+    if (channels.hasNextPage && !channels.isFetchingNextPage) void channels.fetchNextPage();
+  }, [channels]);
 
   return (
     <View style={styles.page}>
@@ -258,10 +273,7 @@ export function LiveScreen({
             onFocus={tv ? () => setSearchFocused(true) : undefined}
             onBlur={tv ? () => setSearchFocused(false) : undefined}
             value={search}
-            onChangeText={(v) => {
-              setSearch(v);
-              setPage(1);
-            }}
+            onChangeText={setSearch}
             placeholder="Search channels…"
             placeholderTextColor={searchFocused ? "#444" : colors.muted}
             autoCapitalize="none"
@@ -344,7 +356,7 @@ export function LiveScreen({
               label={item.label}
               active={groupId === item.id}
               compact={tv}
-              onPress={() => setFilter(item.id as string | "favourites" | "")}
+              onPress={() => setGroupId(item.id as string | "favourites" | "")}
               showFocusRing={tv}
               onLayout={(x) => {
                 filterOffsets.current[item.id || "all"] = x;
@@ -375,54 +387,37 @@ export function LiveScreen({
         ) : null}
       </View>
 
-      <ScrollView
+      <FlatList
+        // FlatList cannot change numColumns in place.
+        key={viewMode}
         ref={channelListRef}
         style={[styles.channelListBox, { height: channelListH }]}
-        onScroll={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-          channelScrollY.current = e.nativeEvent.contentOffset.y;
-        }}
-        scrollEventThrottle={16}
-      >
-        {channels.isError ? (
-          <Text style={styles.error}>{(channels.error as Error).message}</Text>
-        ) : null}
-        {channels.isPending && items.length === 0 ? (
-          <ChannelListSkeleton rows={8} />
-        ) : null}
-        {items.length === 0 && !channels.isPending ? (
-          <Text style={styles.empty}>No channels in this group.</Text>
-        ) : null}
-        {viewMode === "card" ? (
-          <View style={styles.cardGrid}>
-            {items.map((item, index) => (
-              <View key={item.uuid} style={styles.cardCell}>
-                {renderChannel(item, index)}
-              </View>
-            ))}
-          </View>
-        ) : (
-          items.map((item, index) => (
-            <View key={item.uuid}>{renderChannel(item, index)}</View>
-          ))
-        )}
-        <View style={styles.pager}>
-          <Button
-            label="Prev"
-            variant="ghost"
-            onPress={() => setPage((p) => Math.max(1, p - 1))}
-            showFocusRing={tv}
-          />
-          <Text style={styles.pageLabel}>
-            {page} / {totalPages}
-          </Text>
-          <Button
-            label="Next"
-            variant="ghost"
-            onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
-            showFocusRing={tv}
-          />
-        </View>
-      </ScrollView>
+        data={items}
+        keyExtractor={channelKey}
+        renderItem={renderChannel}
+        numColumns={columns}
+        columnWrapperStyle={columns > 1 ? styles.cardRow : undefined}
+        getItemLayout={getItemLayout}
+        onEndReached={loadMore}
+        onEndReachedThreshold={1.5}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        // Detached off-screen rows cannot take D-pad focus, so moving down would stop.
+        removeClippedSubviews={false}
+        ListEmptyComponent={
+          channels.isPending ? (
+            <ChannelListSkeleton rows={8} />
+          ) : channels.isError ? null : (
+            <Text style={styles.empty}>No channels in this group.</Text>
+          )
+        }
+        ListFooterComponent={
+          channels.isFetchingNextPage ? (
+            <Text style={styles.loadingMore}>Loading more channels…</Text>
+          ) : null
+        }
+      />
     </View>
   );
 }
@@ -540,39 +535,37 @@ function PlayChannelButton({
   );
 }
 
-function ChannelRow({
+type ChannelItemProps = {
+  channel: LiveChannel;
+  index: number;
+  now?: LiveNowNext;
+  favourite: boolean;
+  playEnabled: boolean;
+  showFocusRing?: boolean;
+  onPlay: (uuid: string) => void;
+  onFav: (uuid: string) => void;
+  onFocusIndex: (index: number) => void;
+};
+
+const ChannelRow = memo(function ChannelRow({
   channel,
+  index,
   now,
   favourite,
   playEnabled,
   showFocusRing = false,
   onPlay,
   onFav,
-  onFocus,
-  onRowLayout,
-}: {
-  channel: LiveChannel;
-  now?: LiveNowNext;
-  favourite: boolean;
-  playEnabled: boolean;
-  showFocusRing?: boolean;
-  onPlay: () => void;
-  onFav: () => void;
-  onFocus?: (row: View | null) => void;
-  onRowLayout?: (height: number) => void;
-}) {
-  const rowRef = useRef<View>(null);
-  const fireFocus = () => onFocus?.(rowRef.current);
+  onFocusIndex,
+}: ChannelItemProps) {
+  const play = () => onPlay(channel.uuid);
+  const fireFocus = () => onFocusIndex(index);
   return (
-    <View
-      ref={rowRef}
-      style={styles.row}
-      onLayout={(e) => onRowLayout?.(e.nativeEvent.layout.height)}
-    >
+    <View style={styles.row}>
       <Text style={styles.num} numberOfLines={1} adjustsFontSizeToFit>{channel.number ?? ""}</Text>
       <ChannelLogo channel={channel} size={40} style={styles.rowLogo} />
       <Pressable
-        onPress={onPlay}
+        onPress={play}
         onFocus={fireFocus}
         disabled={!playEnabled}
         style={(state) => [
@@ -589,7 +582,7 @@ function ChannelRow({
         </Text>
       </Pressable>
       <Pressable
-        onPress={onFav}
+        onPress={() => onFav(channel.uuid)}
         onFocus={fireFocus}
         hitSlop={8}
         accessibilityRole="button"
@@ -605,44 +598,32 @@ function ChannelRow({
       </Pressable>
       <PlayChannelButton
         enabled={playEnabled}
-        onPress={onPlay}
+        onPress={play}
         onFocus={fireFocus}
         compact
         showFocusRing={showFocusRing}
       />
     </View>
   );
-}
+});
 
-function ChannelCard({
+const ChannelCard = memo(function ChannelCard({
   channel,
+  index,
   now,
   favourite,
   playEnabled,
   showFocusRing = false,
   onPlay,
   onFav,
-  onFocus,
-  onRowLayout,
-}: {
-  channel: LiveChannel;
-  now?: LiveNowNext;
-  favourite: boolean;
-  playEnabled: boolean;
-  showFocusRing?: boolean;
-  onPlay: () => void;
-  onFav: () => void;
-  onFocus?: (row: View | null) => void;
-  onRowLayout?: (height: number) => void;
-}) {
-  const cardRef = useRef<View>(null);
-  const fireFocus = () => onFocus?.(cardRef.current);
+  onFocusIndex,
+}: ChannelItemProps) {
+  const play = () => onPlay(channel.uuid);
+  const fireFocus = () => onFocusIndex(index);
   return (
     <Pressable
-      ref={cardRef}
-      onPress={onPlay}
+      onPress={play}
       onFocus={fireFocus}
-      onLayout={(e) => onRowLayout?.(e.nativeEvent.layout.height)}
       disabled={!playEnabled}
       style={(state) => [
         styles.card,
@@ -652,7 +633,7 @@ function ChannelCard({
       <View style={styles.cardTop}>
         <ChannelLogo channel={channel} size={56} />
         <Pressable
-          onPress={onFav}
+          onPress={() => onFav(channel.uuid)}
           onFocus={fireFocus}
           hitSlop={8}
           style={(state) => [
@@ -672,13 +653,13 @@ function ChannelCard({
       </Text>
       <PlayChannelButton
         enabled={playEnabled}
-        onPress={onPlay}
+        onPress={play}
         onFocus={fireFocus}
         showFocusRing={showFocusRing}
       />
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: webBg },
@@ -765,8 +746,8 @@ const styles = StyleSheet.create({
   },
   filtersTv: { minHeight: 38 },
   channelListBox: { paddingHorizontal: 16 },
-  cardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  cardCell: { width: "48%", flexGrow: 1 },
+  cardRow: { gap: CARD_GAP, marginBottom: CARD_GAP },
+  loadingMore: { color: colors.muted, fontSize: 13, paddingVertical: 16, textAlign: "center" },
   empty: { color: colors.muted, fontSize: 15, paddingVertical: 24 },
   filterChip: {
     backgroundColor: colors.bg2,
@@ -805,9 +786,9 @@ const styles = StyleSheet.create({
   starting: { color: colors.muted, marginBottom: 8, fontSize: 13 },
   error: { color: colors.danger, marginBottom: 8 },
   row: {
+    height: LIST_ROW_H,
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.bg2,
@@ -843,10 +824,11 @@ const styles = StyleSheet.create({
   },
   card: {
     flex: 1,
+    height: CARD_ROW_H - CARD_GAP,
+    overflow: "hidden",
     backgroundColor: colors.bg1,
     borderRadius: 10,
     padding: 12,
-    marginBottom: 10,
     minWidth: 0,
     borderWidth: 2,
     borderColor: "transparent",
@@ -908,12 +890,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  pager: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    paddingVertical: 10,
-  },
-  pageLabel: { color: colors.text, fontSize: 15 },
 });
