@@ -16,6 +16,21 @@ if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version ?? "")) {
   process.exit(1);
 }
 
+// Android only installs an update whose versionCode is not lower, so it must grow with
+// semver: each prerelease sorts below its final (99) and below the next patch.
+function androidVersionCode(v) {
+  const [core, pre] = v.split(/-(.*)/s);
+  const [major, minor, patch] = core.split(".").map(Number);
+  const preNumber = pre === undefined ? 99 : Number(/(\d+)\D*$/.exec(pre)?.[1] ?? 0);
+  if (minor > 99 || patch > 99 || (pre !== undefined && preNumber > 98)) {
+    console.error(`Cannot map ${v} to an Android versionCode: minor and patch must be < 100, the prerelease number < 99.`);
+    process.exit(1);
+  }
+  return ((major * 100 + minor) * 100 + patch) * 100 + preNumber;
+}
+
+const tvVersionCode = androidVersionCode(version);
+
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 
 if (run("git", ["status", "--porcelain"]).trim()) {
@@ -30,6 +45,7 @@ for (const rel of appConfigs) {
   const path = resolve(root, rel);
   const config = JSON.parse(readFileSync(path, "utf8"));
   config.expo.version = version;
+  if (rel === "apps/tv/app.json") config.expo.android.versionCode = tvVersionCode;
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
 }
 

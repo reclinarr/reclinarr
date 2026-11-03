@@ -162,19 +162,85 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  tv-apk:
+    name: Android TV APK
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag matches TV app version
+        run: test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./apps/tv/app.json').expo.version")"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - run: npm ci --no-audit --no-fund
+      - name: Generate the native Android TV project
+        working-directory: apps/tv
+        env:
+          EXPO_TV: "1"
+        run: npx expo prebuild --platform android --no-install
+      # Every release must be signed with this same key, or installed copies cannot update.
+      # The injected signing flags replace the debug signingConfig Expo puts on release.
+      - name: Assemble signed release APK
+        working-directory: apps/tv/android
+        env:
+          TV_KEYSTORE_BASE64: ${{ secrets.TV_KEYSTORE_BASE64 }}
+          TV_KEYSTORE_PASSWORD: ${{ secrets.TV_KEYSTORE_PASSWORD }}
+          TV_KEY_ALIAS: ${{ secrets.TV_KEY_ALIAS }}
+          TV_KEY_PASSWORD: ${{ secrets.TV_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$TV_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          ./gradlew assembleRelease --no-daemon \
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.jks" \
+            -Pandroid.injected.signing.store.password="$TV_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$TV_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$TV_KEY_PASSWORD"
+          rm "$RUNNER_TEMP/release.jks"
+      - name: Verify release signature
+        run: |
+          apk=apps/tv/android/app/build/outputs/apk/release/app-release.apk
+          certs=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if grep -q "CN=Android Debug" <<<"$certs"; then
+            echo "::error::APK is signed with the debug key"
+            exit 1
+          fi
+          mkdir -p dist
+          mv "$apk" "dist/reclinarr-tv-${GITHUB_REF_NAME#v}.apk"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tv-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: publish
+    needs: [publish, tv-apk]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tv-apk
+          path: dist
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes $prerelease
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes $prerelease dist/*.apk

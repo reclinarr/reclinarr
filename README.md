@@ -113,6 +113,10 @@ Live TV re-encodes H.264 with the GPU when ffmpeg can open one: VideoToolbox whe
 
 Mount `/data/library` (or the `reclinarr-data` volume’s `library/` folder) into Jellyfin as a media library root so **Add to Library** promotions are scanned.
 
+## Android TV app
+
+Each [release](https://github.com/reclinarr/reclinarr/releases/latest) has a signed `reclinarr-tv-<version>.apk` for Android TV and Google TV (armv7 and arm64, Android 9+). Sideload it with an app such as Downloader or with `adb install`. To get updates automatically, add `https://github.com/reclinarr/reclinarr` in [Obtainium](https://github.com/ImranR98/Obtainium). On first launch, enter your Reclinarr server's address.
+
 ## Configuration
 
 See [`.env.example`](./.env.example).
