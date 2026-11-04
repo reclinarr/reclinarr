@@ -23,7 +23,7 @@
     "lint": "eslint ."
   },
   "overrides": {
-    "react-native": "npm:react-native-tvos@0.86.3-0",
+    "react-native": "npm:react-native-tvos@0.88.1-0",
     "uuid": "11.1.1",
     "glob": "13.0.6",
     "@types/react": "~19.3.0"

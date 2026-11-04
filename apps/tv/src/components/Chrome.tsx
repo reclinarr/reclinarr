@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Pressable, StyleSheet, Text, TVFocusGuideView, View } from "react-native";
+import { Pressable, StyleSheet, Text, TVFocusGuideView, View, type ViewInstance } from "react-native";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import {
   useIsFocused,
@@ -364,7 +364,7 @@ function TopNav({
   const queryClient = useQueryClient();
   const layout = useTvLayout();
   const demo = useIsDemoUser();
-  const [activeTab, setActiveTab] = useState<View | null>(null);
+  const [activeTab, setActiveTab] = useState<ViewInstance | null>(null);
   const initial = ((username ?? "U").trim()[0] || "U").toUpperCase();
 
   async function signOut() {

@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from "react";
 import * as ReactNative from "react-native";
-import { Platform, type View, type ViewStyle } from "react-native";
+import { Platform, type ViewInstance, type ViewStyle } from "react-native";
 import { colors } from "./theme.js";
 
 export type TvPressState = { pressed: boolean; focused?: boolean };
@@ -69,7 +69,7 @@ const REMOTE_KEY_LAG_MS = 300;
 
 type TvRemoteEvent = { eventType?: string };
 type TvEventHandlerModule = { addListener(cb: (evt: TvRemoteEvent) => void): unknown };
-type TvFocusableView = View & { requestTVFocus?: () => void };
+type TvFocusableView = ViewInstance & { requestTVFocus?: () => void };
 
 const DPAD_MOVES = new Set(["up", "down", "left", "right"]);
 let lastRemoteKeyAt = 0;
@@ -105,14 +105,14 @@ export function usePreferredFocusOnce(want: boolean): {
    * still held native focus, so the target must draw its focused state from this.
    */
   reclaimed: boolean;
-  ref: RefObject<View | null>;
+  ref: RefObject<ViewInstance | null>;
   onFocus: () => void;
   onBlur: () => void;
 } {
   const suppressed = useContext(TvInitialFocusSuppressedContext);
   const [landed, setLanded] = useState(false);
   const [reclaimed, setReclaimed] = useState(false);
-  const ref = useRef<View | null>(null);
+  const ref = useRef<ViewInstance | null>(null);
   const landedAt = useRef(0);
   const reclaims = useRef(0);
   const dbgId = useRef(Math.random().toString(36).slice(2, 6)).current;

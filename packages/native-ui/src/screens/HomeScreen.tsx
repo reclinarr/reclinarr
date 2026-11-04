@@ -6,6 +6,8 @@ import {
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { actionLabel, canPlayMedia, formatRuntime, home } from "@reclinarr/client";
@@ -33,9 +35,9 @@ export function HomeScreen({
 }: ScreenChromeProps) {
   const homeQuery = useQuery({ queryKey: ["home"], queryFn: () => home() });
   const { playMedia, bufferStatus } = usePlayMedia(nav);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollY = useRef(0);
-  const railRefs = useRef<Record<string, View | null>>({});
+  const railRefs = useRef<Record<string, ViewInstance | null>>({});
   const focusedRail = useRef<string | null>(null);
   const tv = focusMode === "tv";
   const web = appearance === "web";

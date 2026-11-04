@@ -1,5 +1,5 @@
 import { useRef, useState, type Ref } from "react";
-import { FlatList, Text, View, type LayoutChangeEvent } from "react-native";
+import { FlatList, Text, View, type LayoutChangeEvent, type ListViewToken, type ViewInstance } from "react-native";
 import type { Media } from "@reclinarr/shared";
 import { canPlayMedia } from "@reclinarr/client";
 import { HScroll } from "./HScroll.js";
@@ -49,7 +49,7 @@ export function MediaRail({
   preferIndex?: number;
   onLayout?: (e: LayoutChangeEvent) => void;
   /** Root rail view — used by TV pages to scroll focused rails into the viewport. */
-  railRef?: Ref<View>;
+  railRef?: Ref<ViewInstance>;
 }) {
   const browse = appearance === "web";
   // Browser uses hover popovers; Google TV uses D-pad scale cards on the same browse look.
@@ -60,7 +60,7 @@ export function MediaRail({
   const listRef = useRef<FlatList<Media>>(null);
   const visibleRange = useRef({ first: 0, last: 0 });
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 5 }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
     const indices = viewableItems.map((item) => item.index).filter((index): index is number => index != null);
     if (indices.length) {
       visibleRange.current = { first: Math.min(...indices), last: Math.max(...indices) };

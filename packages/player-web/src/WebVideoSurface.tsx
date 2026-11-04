@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, type ViewInstance } from "react-native";
 import type { VideoSurfaceProps } from "@reclinarr/native-ui";
 import { absolutePlaybackUrl, attachWebPlayback } from "./attach.js";
 import { getClient, playbackMediaUrl, SESSION_HEADER, textSubtitles } from "@reclinarr/client";
@@ -23,7 +23,7 @@ const LIVE_MIN_AHEAD_S = 1.25;
  * Opted into Safari AirPlay (native HLS preferred; MSE gets an HLS <source> fallback).
  */
 export function WebVideoSurface(props: VideoSurfaceProps) {
-  const hostRef = useRef<View>(null);
+  const hostRef = useRef<ViewInstance>(null);
   const videoRef = useRef<WebKitVideo | null>(null);
   const handleRef = useRef<ReturnType<typeof attachWebPlayback> | null>(null);
   const airplayAvailable = useRef(false);

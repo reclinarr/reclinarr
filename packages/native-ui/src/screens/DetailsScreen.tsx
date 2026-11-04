@@ -10,6 +10,8 @@ import {
   type StyleProp,
   type TextStyle,
   type ViewStyle,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -789,9 +791,9 @@ export function DetailsScreen({
     setSeason(seasons.find((s) => s > 0) ?? seasons[0]!);
   }, [seasons, season, selectedEpisode, focusEpisode, episodesQuery.data?.resumeEpisode?.seasonNumber]);
 
-  const detailsScrollRef = useRef<ScrollView>(null);
-  const scrollContentRef = useRef<View>(null);
-  const selectedRowRef = useRef<View>(null);
+  const detailsScrollRef = useRef<ScrollViewInstance>(null);
+  const scrollContentRef = useRef<ViewInstance>(null);
+  const selectedRowRef = useRef<ViewInstance>(null);
   const selectedRowKey = selectedEpisode
     ? `${selectedEpisode.seasonNumber}:${selectedEpisode.episodeNumber}`
     : null;

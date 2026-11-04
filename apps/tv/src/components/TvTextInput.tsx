@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Pressable, StyleSheet, TextInput, type TextInputProps } from "react-native";
+import { Pressable, StyleSheet, TextInput, type TextInputProps, type TextInputInstance } from "react-native";
 import { isTvFocused } from "@reclinarr/native-ui";
 
 /**
@@ -7,7 +7,7 @@ import { isTvFocused } from "@reclinarr/native-ui";
  * system IME, which on many Google TVs drops them (InputEventSender status=-32).
  */
 export function TvTextInput({ hasTVPreferredFocus, style, ...props }: TextInputProps) {
-  const ref = useRef<TextInput>(null);
+  const ref = useRef<TextInputInstance>(null);
   return (
     <Pressable
       hasTVPreferredFocus={hasTVPreferredFocus}
