@@ -247,6 +247,7 @@ export function PlayerScreen({
   const mediaLoaded = useRef(false);
   const resumeApplied = useRef(false);
   const positionRef = useRef(0);
+  const positionRenderRef = useRef<"never" | "seconds" | "ticks">("seconds");
   const pausedRef = useRef(false);
   const seekCapRef = useRef(Infinity);
   const barWidthRef = useRef(0);
@@ -272,6 +273,7 @@ export function PlayerScreen({
   const isEpisodePlayback = identity?.mediaType === "episode" && seriesTmdbId != null;
 
   const reveal = useCallback((keep = false) => {
+    setPosition(positionRef.current);
     setControls(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
     // Keep chrome up until media actually moves — otherwise failed loads look like a black screen.
@@ -551,7 +553,15 @@ export function PlayerScreen({
     return fromPlayer > 0 ? fromPlayer : fromSource;
   })();
   const seekCap = seekCapForSource(source, knownDuration);
-  positionRef.current = position;
+  // Each progress tick that sets `position` re-renders this whole screen (~125 ms on an
+  // armv7 TV, 4 ticks/s). Only the iOS subtitle overlay needs every tick; the chrome
+  // shows whole seconds; with both hidden, ticks update positionRef alone.
+  positionRenderRef.current =
+    Platform.OS === "ios" && source.hls && sessionId && subIndex != null
+      ? "ticks"
+      : controls
+        ? "seconds"
+        : "never";
   pausedRef.current = paused;
   seekCapRef.current = seekCap;
   knownDurationRef.current = knownDuration;
@@ -1172,7 +1182,15 @@ export function PlayerScreen({
               if (delta > 0 && delta <= 5_000) watchedMs.current += delta;
             }
             lastProgressAt.current = tick;
-            setPosition(currentTime);
+            const previousSecond = Math.floor(positionRef.current);
+            positionRef.current = currentTime;
+            const renderMode = positionRenderRef.current;
+            if (
+              renderMode === "ticks" ||
+              (renderMode === "seconds" && Math.floor(currentTime) !== previousSecond)
+            ) {
+              setPosition(currentTime);
+            }
             onPositionSeconds?.(currentTime);
             if (typeof d === "number" && Number.isFinite(d) && d > 0) {
               setDuration(d);
