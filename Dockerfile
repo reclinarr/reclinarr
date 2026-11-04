@@ -17,13 +17,8 @@ RUN npm ci --no-audit --no-fund
 RUN npm run build -w @reclinarr/shared
 RUN npm run build -w @reclinarr/client
 RUN npm run build -w @reclinarr/providers
-RUN npm run build -w @reclinarr/api
+RUN npm run bundle -w @reclinarr/api
 RUN npm run build -w @reclinarr/web
-
-# The install above also carries the web, mobile and TV toolchains; the runtime only needs
-# the API's production dependencies.
-FROM build AS deps
-RUN npm ci --omit=dev --workspace=@reclinarr/api --no-audit --no-fund
 
 FROM node:26-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime
 WORKDIR /app
@@ -45,13 +40,12 @@ RUN apt-get update \
   && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx \
   && rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
 
-COPY package.json package-lock.json* ./
-COPY --from=deps /app/node_modules ./node_modules
-# Whole workspaces, not just dist/: npm nests deps that conflict with the root (zod 4 vs
-# the Expo side's zod 3) in each workspace's own node_modules.
-COPY --from=deps /app/packages/shared ./packages/shared
-COPY --from=deps /app/packages/providers ./packages/providers
-COPY --from=deps /app/apps/api ./apps/api
+# The API and packager are single-file bundles; better-sqlite3 stays external because it
+# loads a native binary from its own prebuilds/ directory.
+COPY --from=build /app/apps/api/dist/bundle ./apps/api/dist/bundle
+COPY --from=build /app/node_modules/better-sqlite3/package.json ./node_modules/better-sqlite3/package.json
+COPY --from=build /app/node_modules/better-sqlite3/lib ./node_modules/better-sqlite3/lib
+COPY --from=build /app/node_modules/better-sqlite3/prebuilds ./node_modules/better-sqlite3/prebuilds
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 COPY docker/nginx/nginx.conf.template /etc/nginx/nginx.conf.template

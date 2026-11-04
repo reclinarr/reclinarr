@@ -122,11 +122,11 @@ RECLINARR_MEDIA_PLANE=nginx \
 RECLINARR_EMBED_PACKAGER=false \
 RECLINARR_NGINX_JELLYFIN_UPSTREAM="$JELLYFIN_UPSTREAM" \
 RECLINARR_NGINX_DISPATCHARR_UPSTREAM="$DISPATCHARR_UPSTREAM" \
-  as_node node /app/apps/api/dist/server.js &
+  as_node node /app/apps/api/dist/bundle/server.mjs &
 API_PID=$!
 
 RECLINARR_EMBED_PACKAGER=false \
-  as_node node /app/apps/api/dist/packager.js &
+  as_node node /app/apps/api/dist/bundle/packager.mjs &
 PACK_PID=$!
 
 as_node nginx -g 'daemon off;' &
