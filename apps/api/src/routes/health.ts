@@ -3,7 +3,13 @@ import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../context.js";
 import { requireAuth } from "../plugins/auth.js";
 
-const { version } = createRequire(import.meta.url)("../../package.json") as { version: string };
+// The single-file bundle (scripts/bundle.mjs) inlines the version, since its output no longer
+// sits two directories below package.json.
+declare const RECLINARR_BUNDLED_VERSION: string | undefined;
+const version =
+  typeof RECLINARR_BUNDLED_VERSION === "string"
+    ? RECLINARR_BUNDLED_VERSION
+    : (createRequire(import.meta.url)("../../package.json") as { version: string }).version;
 const commit = process.env.RECLINARR_COMMIT;
 
 export async function registerHealthRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
