@@ -23,10 +23,11 @@ services:
       # Inside the container nginx always listens on 8787; RECLINARR_PORT picks the host port.
       RECLINARR_PORT: "8787"
       RECLINARR_DATA_DIR: /data
-    # Live transcode uses VAAPI when /dev/dri is mounted (Intel/AMD on a Linux host).
+    # Live transcode uses VAAPI/Quick Sync when /dev/dri is mounted (Intel/AMD on a Linux host).
     # devices:
     #   - /dev/dri:/dev/dri
-    # NVIDIA NVENC needs an ffmpeg with h264_nvenc (FFMPEG_PATH) and `gpus: all`.
+    # NVIDIA NVENC needs the NVIDIA Container Toolkit on the host.
+    # gpus: all
     # macOS VideoToolbox is used when the API process runs on macOS, outside this container.
     volumes:
       - reclinarr-data:/data

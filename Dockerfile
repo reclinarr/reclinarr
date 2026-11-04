@@ -2,9 +2,11 @@
 #   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 #   docker compose -f docker/docker-compose.yml up -d --build
 
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS build
+FROM node:26-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS build
 WORKDIR /app
-RUN apk add --no-cache python3 make g++
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
 COPY apps ./apps
 COPY packages ./packages
@@ -23,21 +25,25 @@ RUN npm run build -w @reclinarr/web
 FROM build AS deps
 RUN npm ci --omit=dev --workspace=@reclinarr/api --no-audit --no-fund
 
-FROM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS runtime
+FROM node:26-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-# nginx (media plane) + ffmpeg/ffprobe (HLS packager) + envsubst.
-# VAAPI userspace so live transcode can use an Intel/AMD GPU when /dev/dri is mounted.
-# Both drivers are x86_64-only here: mesa's AMD driver pulls in ~200MB of LLVM, and AMD
-# GPUs on arm64 hosts are rare enough that arm64 uses software encoding.
-RUN apk add --no-cache nginx ffmpeg gettext-envsubst curl libva \
-  && { apk add --no-cache libva-utils || echo "libva-utils unavailable"; } \
-  && if [ "$(apk --print-arch)" = x86_64 ]; then \
-       { apk add --no-cache mesa-va-gallium || echo "mesa-va-gallium unavailable"; } \
-       && { apk add --no-cache intel-media-driver || echo "intel-media-driver unavailable"; }; \
-     fi \
-  && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/tmp \
-  && rm -f /etc/nginx/http.d/default.conf /etc/nginx/conf.d/default.conf
+# nginx (media plane) + envsubst + Jellyfin's ffmpeg build (HLS packager and live transcode).
+# jellyfin-ffmpeg has NVENC, Quick Sync and VAAPI, with its own Intel/AMD drivers on amd64.
+# It needs glibc, as do the NVENC libraries NVIDIA's container toolkit mounts in, which is
+# why the image is Debian rather than Alpine.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key -o /etc/apt/keyrings/jellyfin.asc \
+  && printf '%s\n' 'Types: deb' 'URIs: https://repo.jellyfin.org/debian' 'Suites: trixie' \
+       'Components: main' 'Signed-By: /etc/apt/keyrings/jellyfin.asc' \
+       > /etc/apt/sources.list.d/jellyfin.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends nginx gettext-base jellyfin-ffmpeg7 \
+  && rm -rf /var/lib/apt/lists/* \
+  && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx \
+  && rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
 
 COPY package.json package-lock.json* ./
 COPY --from=deps /app/node_modules ./node_modules
@@ -59,7 +65,9 @@ ARG RECLINARR_COMMIT
 ENV RECLINARR_COMMIT=$RECLINARR_COMMIT
 ENV RECLINARR_MEDIA_PLANE=nginx
 ENV RECLINARR_EMBED_PACKAGER=false
-ENV FFMPEG_PATH=/usr/bin/ffmpeg
-ENV FFPROBE_PATH=/usr/bin/ffprobe
+ENV FFMPEG_PATH=/usr/lib/jellyfin-ffmpeg/ffmpeg
+ENV FFPROBE_PATH=/usr/lib/jellyfin-ffmpeg/ffprobe
+# `video` makes NVIDIA's container toolkit mount the NVENC libraries when a GPU is passed in.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 EXPOSE 8787
 CMD ["/entrypoint.sh"]

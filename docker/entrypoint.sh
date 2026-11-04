@@ -101,16 +101,17 @@ for dev in /dev/dri/renderD*; do
   group="$(awk -F: -v gid="$gid" '$3 == gid { print $1 }' /etc/group)"
   if [ -z "$group" ]; then
     group="render$gid"
-    addgroup -g "$gid" "$group"
+    groupadd -g "$gid" "$group"
   fi
-  id -nG node | tr ' ' '\n' | grep -qx "$group" || addgroup node "$group"
+  id -nG node | tr ' ' '\n' | grep -qx "$group" || usermod -aG "$group" node
 done
 
-# Only call backgrounded: `&` forks a subshell, and exec (plus busybox su not forking) keeps
-# $! pointing at the child itself so `term` can signal it.
-# `--` stops su from parsing the child's flags (nginx -g) as its own.
+# Only call backgrounded: `&` forks a subshell, and exec plus setpriv (which, unlike su,
+# does not fork) keeps $! pointing at the child itself so `term` can signal it.
+# `--` stops setpriv from parsing the child's flags (nginx -g) as its own.
 as_node() {
-  exec su -s /bin/sh -c 'exec "$0" "$@"' -- node "$@"
+  export HOME=/home/node USER=node LOGNAME=node
+  exec setpriv --reuid=node --regid=node --init-groups -- "$@"
 }
 
 # API on loopback; nginx publishes RECLINARR_PORT.
