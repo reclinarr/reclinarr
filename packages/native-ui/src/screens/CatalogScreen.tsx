@@ -6,6 +6,8 @@ import {
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { catalogRails } from "@reclinarr/client";
@@ -40,9 +42,9 @@ export function CatalogScreen({
   const rows = catalog.data?.rows ?? [];
   const tv = focusMode === "tv";
   const web = appearance === "web";
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollY = useRef(0);
-  const railRefs = useRef<Record<string, View | null>>({});
+  const railRefs = useRef<Record<string, ViewInstance | null>>({});
   const focusedRail = useRef<string | null>(null);
   const focusPage = `catalog:${mediaType}`;
   const [restore] = useState(() => (tv ? recallRailFocus(focusPage, rows) : null));

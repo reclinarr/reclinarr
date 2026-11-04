@@ -7,6 +7,7 @@ import {
   type PressableProps,
   type StyleProp,
   type ViewStyle,
+  type ViewInstance,
 } from "react-native";
 import { isTvFocused, tvFocusFill, tvFocusRingOnLight, useTvFocusAllowed } from "./focus.js";
 import { DownloadIcon, PlayIcon } from "./icons.js";
@@ -227,7 +228,7 @@ export function PillButton({
   disabled?: boolean;
   showFocusRing?: boolean;
   hasTVPreferredFocus?: boolean;
-  focusRef?: Ref<View>;
+  focusRef?: Ref<ViewInstance>;
   /** Draw as focused: native focus was restored without a focus event. */
   forceFocused?: boolean;
   onFocus?: () => void;

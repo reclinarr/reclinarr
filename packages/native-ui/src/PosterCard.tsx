@@ -7,6 +7,7 @@ import {
   Text,
   View,
   type ViewStyle,
+  type ViewInstance,
 } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Media } from "@reclinarr/shared";
@@ -87,7 +88,7 @@ export type PosterCardProps = {
   onFocusCard?: () => void;
   onBlurCard?: () => void;
   /** Host view of the focusable surface (TV focus restore). */
-  focusRef?: Ref<View>;
+  focusRef?: Ref<ViewInstance>;
   /** Draw as focused: native focus was restored without a focus event. */
   forceFocused?: boolean;
   /**

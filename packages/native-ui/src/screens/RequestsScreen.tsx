@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type ScrollViewInstance, type ViewInstance } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { listRequests } from "@reclinarr/client";
 import { isTvFocused, tvFocusHighlight } from "../focus.js";
@@ -17,9 +17,9 @@ export function RequestsScreen({
 }: Pick<ScreenChromeProps, "nav" | "header" | "focusMode">) {
   const tv = focusMode === "tv";
   const [page, setPage] = useState(0);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const offset = useRef(0);
-  const rows = useRef<Record<number, View | null>>({});
+  const rows = useRef<Record<number, ViewInstance | null>>({});
   const { height } = useWindowDimensions();
   const pageSize = 25;
   const query = useQuery({

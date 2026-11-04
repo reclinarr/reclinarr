@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import type { ScrollView, View } from "react-native";
+import type { ScrollViewInstance, ViewInstance } from "react-native";
 
 type ScrollOpts = {
   /** Pixels from the top of the window that are covered (e.g. header). */
@@ -21,7 +21,7 @@ type ScrollOpts = {
  * Eagerly updates scrollY so rapid D-pad moves stay accurate before onScroll fires.
  */
 export function scrollWindowRectIntoView(
-  scrollRef: RefObject<ScrollView | null>,
+  scrollRef: RefObject<ScrollViewInstance | null>,
   scrollY: RefObject<number>,
   y: number,
   height: number,
@@ -50,15 +50,15 @@ export function scrollWindowRectIntoView(
 }
 
 export function measureAndScrollIntoView(
-  target: View | null | undefined,
-  scrollRef: RefObject<ScrollView | null>,
+  target: ViewInstance | null | undefined,
+  scrollRef: RefObject<ScrollViewInstance | null>,
   scrollY: RefObject<number>,
   screenH: number,
   opts?: ScrollOpts,
 ) {
   if (!target) return;
-  const scroll = scrollRef.current as (ScrollView & { getInnerViewRef?: () => View | null }) | null;
-  const outer = scroll?.getNativeScrollRef?.() as View | null | undefined;
+  const scroll = scrollRef.current;
+  const outer = scroll?.getNativeScrollRef?.();
   const inner = scroll?.getInnerViewRef?.();
   if (!outer || !inner) {
     target.measureInWindow((_x, y, _w, h) => {

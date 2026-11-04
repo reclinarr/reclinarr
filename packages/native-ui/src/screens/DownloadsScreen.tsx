@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type ScrollViewInstance, type ViewInstance } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Acquisition } from "@reclinarr/shared";
 import {
@@ -23,10 +23,10 @@ function DownloadRow({ item, nav, tv, onFocus }: {
   item: Acquisition;
   nav: ScreenChromeProps["nav"];
   tv: boolean;
-  onFocus: (view: View | null) => void;
+  onFocus: (view: ViewInstance | null) => void;
 }) {
   const queryClient = useQueryClient();
-  const row = useRef<View>(null);
+  const row = useRef<ViewInstance>(null);
   const identity = item.identity;
   const type = identity.mediaType === "movie" ? "movie" : "tv";
   const details = useQuery({
@@ -98,7 +98,7 @@ function DownloadRow({ item, nav, tv, onFocus }: {
 
 export function DownloadsScreen({ nav, header, focusMode = "touch" }: Pick<ScreenChromeProps, "nav" | "header" | "focusMode">) {
   const tv = focusMode === "tv";
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const offset = useRef(0);
   const { height } = useWindowDimensions();
   const query = useQuery({

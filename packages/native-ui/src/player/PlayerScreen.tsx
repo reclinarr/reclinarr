@@ -15,6 +15,7 @@ import {
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
+  type ViewInstance,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { KeyValueStorage, SubtitlePref } from "@reclinarr/client";
@@ -251,7 +252,7 @@ export function PlayerScreen({
   const pausedRef = useRef(false);
   const seekCapRef = useRef(Infinity);
   const barWidthRef = useRef(0);
-  const barElRef = useRef<View>(null);
+  const barElRef = useRef<ViewInstance>(null);
   const knownDurationRef = useRef(0);
   /** Remount the surface after a live reload (URL often stays the same). */
   const [liveRecoveryGen, setLiveRecoveryGen] = useState(0);

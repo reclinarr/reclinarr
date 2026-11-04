@@ -12,7 +12,8 @@ export function usePlayerRemote(handler: (eventType: string) => void): void {
     const type = event.eventType;
     // Arrows fire down+up; skip on up so seek does not run twice.
     // Center / media / channel keys often arrive only as key-up on Android TV.
-    if (!PLAY_KEYS.has(type) && event.eventKeyAction === 1) return;
+    // react-native-tvos 0.88 types eventKeyAction as string here, but Android sends a number.
+    if (!PLAY_KEYS.has(type) && Number(event.eventKeyAction) === 1) return;
     if (PLAY_KEYS.has(type)) {
       const now = Date.now();
       if (type === lastPlayKey && now - lastPlayAt < PLAY_DEBOUNCE_MS) return;

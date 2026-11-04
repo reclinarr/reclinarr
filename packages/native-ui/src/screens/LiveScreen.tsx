@@ -12,6 +12,7 @@ import {
   type PressableStateCallbackType,
   type StyleProp,
   type ViewStyle,
+  type TextInputInstance,
 } from "react-native";
 import {
   useInfiniteQuery,
@@ -128,7 +129,7 @@ export function LiveScreen({
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [sort, setSort] = useState<LiveSort>("number");
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const channelListRef = useRef<FlatList<LiveChannel>>(null);
   const railListRef = useRef<FlatList<FilterItem>>(null);
   // Android TV Yoga often collapses flex:1 FlatLists to 0 height, so lists get an explicit
@@ -407,14 +408,14 @@ export function LiveScreen({
       ListEmptyComponent={
         channels.isPending ? (
           <ChannelListSkeleton rows={8} />
-        ) : channels.isError ? null : (
+        ) : channels.isError ? undefined : (
           <Text style={styles.empty}>No channels in this group.</Text>
         )
       }
       ListFooterComponent={
         channels.isFetchingNextPage ? (
           <Text style={styles.loadingMore}>Loading more channels…</Text>
-        ) : null
+        ) : undefined
       }
     />
   );
