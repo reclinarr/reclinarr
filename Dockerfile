@@ -2,7 +2,7 @@
 #   docker build -t reclinarr https://github.com/reclinarr/reclinarr.git
 #   docker compose -f docker/docker-compose.yml up -d --build
 
-FROM node:26-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS build
+FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS build
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
@@ -20,7 +20,7 @@ RUN npm run build -w @reclinarr/providers
 RUN npm run bundle -w @reclinarr/api
 RUN npm run build -w @reclinarr/web
 
-FROM node:26-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS runtime
+FROM node:26-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # nginx (media plane) + envsubst + Jellyfin's ffmpeg build (HLS packager and live transcode).
