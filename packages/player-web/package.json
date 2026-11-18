@@ -16,7 +16,7 @@
     "@reclinarr/client": "*",
     "@reclinarr/native-ui": "*",
     "@reclinarr/shared": "*",
-    "hls.js": "^1.7.3",
+    "hls.js": "^1.7.4",
     "mpegts.js": "^1.8.2"
   },
   "peerDependencies": {
